@@ -88,19 +88,19 @@ function process_msg() {
 
       const prev_process_input_img = process.og_img_uri;
       const prev_process_output_img = process.new_img_uri;
-      
+
       // Get current process, delete it and create it's sucessor if possible
       const og_img_uri = process.og_img_uri;
       const img_id = process.img_id;
-      
+
       await Process.delete(process.user_id, process.project_id, process._id);
-      
+
       if (msg_content.status === "error") {
         console.log(JSON.stringify(msg_content));
         if (/preview/.test(msg_id)) {
           send_msg_client_preview_error(`update-client-preview-${uuidv4()}`, timestamp, process.user_id, msg_content.error.code, msg_content.error.msg)
         }
-        
+
         else {
           send_msg_client_error(
             user_msg_id,
@@ -112,7 +112,7 @@ function process_msg() {
         }
         return;
       }
-      
+
       const output_file_uri = msg_content.output.imageURI;
       const type = msg_content.output.type;
       const project = await Project.getOne(process.user_id, process.project_id);
@@ -142,7 +142,7 @@ function process_msg() {
         const og_key_tmp = resp.data.data.imageKey.split("/");
         const og_key = og_key_tmp[og_key_tmp.length - 1];
 
-        
+
         const preview = {
           type: type,
           file_name: file_name,
@@ -151,10 +151,10 @@ function process_msg() {
           project_id: process.project_id,
           user_id: process.user_id,
         };
-        
+
         await Preview.create(preview);
 
-        if(next_pos >= project.tools.length){
+        if (next_pos >= project.tools.length) {
           const previews = await Preview.getAll(process.user_id, process.project_id);
 
           let urls = {
@@ -162,7 +162,7 @@ function process_msg() {
             'textResults': []
           };
 
-          for(let p of previews){
+          for (let p of previews) {
             const url_resp = await get_image_host(
               process.user_id,
               process.project_id,
@@ -172,11 +172,11 @@ function process_msg() {
 
             const url = url_resp.data.url;
 
-            if(p.type != "text") urls.imageUrl = url;
+            if (p.type != "text") urls.imageUrl = url;
 
             else urls.textResults.push(url);
           }
-          
+
           send_msg_client_preview(
             `update-client-preview-${uuidv4()}`,
             timestamp,
@@ -187,7 +187,7 @@ function process_msg() {
         }
       }
 
-      if(/preview/.test(msg_id) && next_pos >= project.tools.length) return;
+      if (/preview/.test(msg_id) && next_pos >= project.tools.length) return;
 
       if (!/preview/.test(msg_id))
         send_msg_client(
@@ -330,7 +330,10 @@ router.get("/:user/:project", (req, res, next) => {
 
       res.status(200).jsonp(response);
     })
-    .catch((_) => res.status(501).jsonp(`Error acquiring user's project`));
+    .catch((err) => {
+      console.error("DEBUG: Error in GET /:user/:project:", err);
+      res.status(501).jsonp(`Error acquiring user's project`);
+    });
 });
 
 // Get a specific project's image
@@ -472,9 +475,9 @@ router.get("/:user/:project/process/url", (req, res, next) => {
         );
         const url = resp.data.url;
 
-        if(r.type == 'text') ans.texts.push({ og_img_id : r.img_id, name: r.file_name, url: url })
+        if (r.type == 'text') ans.texts.push({ og_img_id: r.img_id, name: r.file_name, url: url })
 
-        else ans.imgs.push({ og_img_id : r.img_id, name: r.file_name, url: url })
+        else ans.imgs.push({ og_img_id: r.img_id, name: r.file_name, url: url })
       }
 
       res.status(200).jsonp(ans);
@@ -530,7 +533,7 @@ router.post("/:user/:project/preview/:img", (req, res, next) => {
         req.params.project
       );
 
-      for(let p of prev_preview){
+      for (let p of prev_preview) {
         await delete_image(
           req.params.user,
           req.params.project,

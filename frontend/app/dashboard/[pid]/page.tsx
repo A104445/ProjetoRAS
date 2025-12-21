@@ -32,6 +32,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ModeToggle } from "@/components/project-page/mode-toggle";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { ShareButton } from "@/components/project-page/share-button";
+import { ShareDashboard } from "@/components/project-page/share-dashboard";
 
 export default function Project({
   params,
@@ -240,6 +242,16 @@ export default function Project({
                   <AddImagesDialog />
                 </>
               )}
+              <ShareButton
+                projectId={project.data._id}
+                projectName={project.data.name}
+                isOwner={project.data.user_id === session.user._id}
+              />
+              <ShareDashboard
+                projectId={project.data._id}
+                projectName={project.data.name}
+                isOwner={project.data.user_id === session.user._id}
+              />
               <Button
                 variant="outline"
                 className="px-3"

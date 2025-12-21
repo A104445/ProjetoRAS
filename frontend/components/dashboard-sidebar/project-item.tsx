@@ -19,7 +19,7 @@ import {
   DialogFooter,
   DialogDescription,
 } from "../ui/dialog";
-import { Ellipsis, Pencil, Trash } from "lucide-react";
+import { Ellipsis, Pencil, Trash, Share2 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "../ui/button";
 import { useDeleteProject, useUpdateProject } from "@/lib/mutations/projects";
@@ -28,6 +28,7 @@ import { useEffect, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useSession } from "@/providers/session-provider";
 import { Project } from "@/lib/projects";
+import { ProjectShareDialog } from "./project-share-dialog";
 
 export default function ProjectItem({ p }: { p: Project }) {
   const router = useRouter();
@@ -35,7 +36,8 @@ export default function ProjectItem({ p }: { p: Project }) {
   const { toast } = useToast();
 
   const [open, setOpen] = useState<boolean>(false);
-  const [option, setOption] = useState<"rename" | "delete">("rename");
+  const [option, setOption] = useState<"rename" | "delete" | "share">("rename");
+  const [shareDialogOpen, setShareDialogOpen] = useState<boolean>(false);
   const [newName, setNewName] = useState<string>(p.name);
 
   const session = useSession();
@@ -88,6 +90,17 @@ export default function ProjectItem({ p }: { p: Project }) {
                 <p>Rename</p>
                 <Pencil className="size-[1em]" />
               </DialogTrigger>
+            </DropdownMenuItem>
+            <DropdownMenuItem>
+              <div
+                className="flex justify-between w-full items-center cursor-pointer"
+                onClick={() => {
+                  setShareDialogOpen(true);
+                }}
+              >
+                <p>Share</p>
+                <Share2 className="size-[1em]" />
+              </div>
             </DropdownMenuItem>
             <DropdownMenuItem>
               <DialogTrigger
@@ -155,6 +168,13 @@ export default function ProjectItem({ p }: { p: Project }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ProjectShareDialog
+        projectId={p._id}
+        projectName={p.name}
+        open={shareDialogOpen}
+        onOpenChange={setShareDialogOpen}
+      />
     </SidebarMenuItem>
   );
 }

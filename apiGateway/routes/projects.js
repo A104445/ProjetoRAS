@@ -24,6 +24,74 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 const projectsURL = "https://projects:9001/";
+const SHARES_SERVICE = process.env.SHARES_SERVICE_URL || "https://shares:9003";
+
+// --- Share Routes (Nested under /projects) ---
+
+/**
+ * Create share (POST /projects/:projectId/shares)
+ */
+router.post("/:projectId/shares", function (req, res, next) {
+  // Inject projectId from param into body if needed, or just forward
+  const payload = { ...req.body, projectId: req.params.projectId };
+  console.log("Creating share via projects route:", payload);
+  axios
+    .post(SHARES_SERVICE + "/shares", payload, {
+      httpsAgent: httpsAgent,
+    })
+    .then((resp) => res.status(201).jsonp(resp.data))
+    .catch((err) => {
+      console.error("DEBUG: Error creating share via projects route.");
+      console.error("DEBUG: Error message:", err.message);
+      if (err.response) {
+        console.error("DEBUG: Response status:", err.response.status);
+        console.error("DEBUG: Response data:", JSON.stringify(err.response.data));
+      } else if (err.request) {
+        console.error("DEBUG: No response received. Request info:", err.request);
+      } else {
+        console.error("DEBUG: Error config:", err.config);
+      }
+
+      const status = err.response?.status || 500;
+      const message = err.response?.data?.error || "Error creating share";
+      res.status(status).jsonp({ error: message });
+    });
+});
+
+/**
+ * List project shares (GET /projects/:projectId/shares)
+ */
+router.get("/:projectId/shares", function (req, res, next) {
+  axios
+    .get(SHARES_SERVICE + `/shares/project/${req.params.projectId}`, {
+      params: req.query, // Forward query params like userId
+      httpsAgent: httpsAgent,
+    })
+    .then((resp) => res.status(200).jsonp(resp.data))
+    .catch((err) => {
+      console.error("Error getting shares:", err.message);
+      res.status(500).jsonp("Error getting project shares");
+    });
+});
+
+/**
+ * Revoke share (DELETE /projects/:projectId/shares/:shareId)
+ */
+router.delete("/:projectId/shares/:shareId", function (req, res, next) {
+  axios
+    .delete(SHARES_SERVICE + `/shares/${req.params.shareId}`, {
+      data: req.body, // Forward body containing userId
+      httpsAgent: httpsAgent,
+    })
+    .then((resp) => res.status(200).jsonp(resp.data))
+    .catch((err) => {
+      console.error("Error revoking share:", err.message);
+      res.status(500).jsonp("Error revoking share");
+    });
+});
+
+// ---------------------------------------------
+
 
 // TODO Verify jwt
 
