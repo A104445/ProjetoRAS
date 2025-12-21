@@ -1,4 +1,4 @@
-# PictuRAS
+# PictuRAS Edicao
 
 **Your personal, intuitive and powerful image editor.**
 
