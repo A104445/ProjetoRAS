@@ -9,6 +9,7 @@ function get_jwt(user) {
   const token = jwt.sign(
     {
       id: user._id,
+      type: user.type || "free",
     },
     process.env.JWT_SECRET_KEY,
     {

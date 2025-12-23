@@ -1,27 +1,11 @@
 const Share = require('../models/Share');
+const ActiveSession = require('../models/ActiveSession');
 const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 const lockManager = require('./lockManager');
-
-// Dedicated connections to other microservices' databases
-// Note: In a pure microservice architecture, we should call the services APIs instead.
-// But for now we fix the direct DB access.
-const projectsConnection = mongoose.createConnection(
-    process.env.PROJECTS_MONGO_URI || "mongodb://projects_mongoDB:27018/project",
-    { useNewUrlParser: true, useUnifiedTopology: true }
-);
-
-const usersConnection = mongoose.createConnection(
-    process.env.USERS_MONGO_URI || "mongodb://users_mongoDB:27019/user",
-    { useNewUrlParser: true, useUnifiedTopology: true }
-);
-
-const ProjectSchema = new mongoose.Schema({}, { strict: false });
-const UserSchema = new mongoose.Schema({}, { strict: false });
-
-const Project = projectsConnection.model('Project', ProjectSchema);
-const User = usersConnection.model('User', UserSchema);
+const notifications = require('./notificationService');
+const { ProjectsAPI, UsersAPI } = require('./apiClient');
 
 
 class SharesService {
@@ -29,22 +13,12 @@ class SharesService {
     async createShare(ownerId, projectId, permission, expiresIn = null) {
         console.log(`DEBUG: Service createShare - ownerId: ${ownerId}, projectId: ${projectId}, permission: ${permission}`);
 
-        // Verify project exists and user is owner
-        // used global Project model
+        // Verify project exists and user is owner via API
+        const ownershipResult = await ProjectsAPI.verifyProjectOwnership(projectId, ownerId);
 
+        console.log("DEBUG: Ownership verification result:", ownershipResult);
 
-        const project = await Project.findOne({
-            _id: new mongoose.Types.ObjectId(projectId)
-        });
-
-        console.log("DEBUG: Project lookup by ID result:", project ? "Found" : "Not Found");
-        if (project) {
-            console.log("DEBUG: Project user_id:", project.user_id);
-            console.log("DEBUG: Project user_id type:", typeof project.user_id);
-            console.log("DEBUG: OwnerId:", ownerId);
-        }
-
-        if (!project || project.user_id.toString() !== ownerId) {
+        if (!ownershipResult.exists || !ownershipResult.isOwner) {
             console.error(`DEBUG: Project not found or ownership mismatch. ProjectId: ${projectId}, OwnerId: ${ownerId}`);
             throw new Error('Project not found or you are not the owner');
         }
@@ -112,9 +86,8 @@ class SharesService {
             throw error;
         }
 
-        // Get project summary
-        // used global Project model
-        const project = await Project.findById(share.projectId);
+        // Get project summary via API
+        const project = await ProjectsAPI.getProjectById(share.projectId.toString());
 
         return {
             share: {
@@ -183,41 +156,110 @@ class SharesService {
 
         await share.save();
 
-        // Get project data
-        // used global Project model
-        const project = await Project.findById(share.projectId);
+        // Get project data via API
+        const project = await ProjectsAPI.getProjectById(share.projectId.toString());
 
         if (!project) {
             throw new Error('Project not found');
         }
 
+        // Add user to project permissions if authenticated
+        if (userId) {
+            const role = share.permission; // "view" or "edit"
+            const permResult = await ProjectsAPI.addPermission(
+                share.projectId.toString(),
+                userId,
+                role
+            );
+            if (permResult) {
+                console.log(`Added ${role} permission for user ${userId} to project ${share.projectId}`);
+            } else {
+                console.warn(`Failed to add permission for user ${userId} to project ${share.projectId}`);
+            }
+        }
+
         // Create session ID
         const sessionId = uuidv4();
 
+        // Get or create active sessions record
+        let activeSessionDoc = await ActiveSession.findOne({
+            projectId: share.projectId
+        });
+
+        if (!activeSessionDoc) {
+            activeSessionDoc = new ActiveSession({
+                projectId: share.projectId,
+                sessions: []
+            });
+        }
+
+        // Get user info via API if available
+        let userName = 'Guest';
+        if (userId) {
+            try {
+                const user = await UsersAPI.getUser(userId);
+                userName = user?.name || 'User';
+            } catch (e) {
+                console.error('Error fetching user:', e);
+            }
+        }
+
+        // Add new session
+        const newSession = {
+            sessionId,
+            userId: userId ? new mongoose.Types.ObjectId(userId) : null,
+            userName,
+            permission: share.permission,
+            role: 'reader',
+            connectedAt: new Date(),
+            lastActivity: new Date(),
+            isActive: true
+        };
+
+        activeSessionDoc.sessions.push(newSession);
+        await activeSessionDoc.save();
+
+        // Get active sessions (filter out inactive ones)
+        const activeSessions = activeSessionDoc.sessions
+            .filter(s => s.isActive)
+            .map(s => ({
+                sessionId: s.sessionId,
+                userId: s.userId?.toString(),
+                userName: s.userName,
+                permission: s.permission,
+                role: s.role,
+                connectedAt: s.connectedAt
+            }));
+
         // Get lock status
         const lockStatus = await lockManager.getLockStatus(share.projectId.toString());
+
+        // Notify other users about new session
+        if (userId) {
+            await notifications.notifyUserJoined(
+                share.projectId.toString(),
+                userId,
+                userName,
+                'reader'
+            );
+        }
 
         return {
             projectData: project,
             permission: share.permission,
             sessionId,
             role: 'reader', // Always starts as reader
-            activeSessions: [], // TODO: Get from active_sessions collection
+            activeSessions,
             lockStatus
         };
     }
 
     // List shares for a project
     async listProjectShares(projectId, userId) {
-        // Verify ownership
-        // used global Project model
+        // Verify ownership via API
+        const ownershipResult = await ProjectsAPI.verifyProjectOwnership(projectId, userId);
 
-        const project = await Project.findOne({
-            _id: new mongoose.Types.ObjectId(projectId),
-            user_id: new mongoose.Types.ObjectId(userId)
-        });
-
-        if (!project) {
+        if (!ownershipResult.exists || !ownershipResult.isOwner) {
             const error = new Error('Project not found or you are not the owner');
             error.status = 403;
             throw error;
@@ -286,11 +328,9 @@ class SharesService {
             };
         }
 
-        // Get project and owner info
-        // used global Project and User models
-
-        const project = await Project.findById(share.projectId);
-        const owner = await User.findById(share.ownerId);
+        // Get project and owner info via APIs
+        const project = await ProjectsAPI.getProjectById(share.projectId.toString());
+        const owner = await UsersAPI.getUser(share.ownerId.toString());
 
         return {
             valid: true,
@@ -343,12 +383,10 @@ class SharesService {
             return !share.expiresAt || share.expiresAt > new Date();
         });
 
-        // Get project details for each share
-        // used global Project model
-
+        // Get project details for each share via API
         const sharesWithProjects = await Promise.all(
             validShares.map(async (share) => {
-                const project = await Project.findById(share.projectId);
+                const project = await ProjectsAPI.getProjectById(share.projectId.toString());
                 const userAccess = share.accessedBy.find(
                     a => a.userId.toString() === userId
                 );

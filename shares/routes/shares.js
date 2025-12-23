@@ -1,14 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const sharesService = require('../services/sharesService');
+const { checkAuth, optionalAuth } = require('../config/auth');
 
-// Create share
-router.post('/', async (req, res, next) => {
+// Create share (requires authentication)
+router.post('/', checkAuth, async (req, res, next) => {
     console.log("DEBUG: Shares Service - Received create share request");
     console.log("DEBUG: Request body:", JSON.stringify(req.body));
     try {
-        const { projectId, permission, expiresIn, userId } = req.body;
-        const ownerId = userId;
+        const { projectId, permission, expiresIn } = req.body;
+        const ownerId = req.userId; // From auth middleware
 
         if (!projectId || !permission) {
             return res.status(400).json({ error: 'Missing required fields' });
@@ -29,12 +30,12 @@ router.post('/', async (req, res, next) => {
     }
 });
 
-// Get share details
-router.get('/:shareId', async (req, res, next) => {
+// Get share details (requires authentication)
+router.get('/:shareId', checkAuth, async (req, res, next) => {
     try {
         const { shareId } = req.params;
         const token = req.headers['x-share-token'];
-        const userId = req.userId; // TODO: Extract from JWT
+        const userId = req.userId; // From auth middleware
 
         const result = await sharesService.getShareDetails(shareId, token, userId);
         res.json(result);
@@ -43,12 +44,12 @@ router.get('/:shareId', async (req, res, next) => {
     }
 });
 
-// Access shared project
-router.post('/:shareId/access', async (req, res, next) => {
+// Access shared project (requires authentication)
+router.post('/:shareId/access', checkAuth, async (req, res, next) => {
     try {
         const { shareId } = req.params;
         const { token } = req.body;
-        const userId = req.userId; // Extract from JWT
+        const userId = req.userId; // From auth middleware
 
         if (!token) {
             return res.status(400).json({ error: 'Token is required' });
@@ -61,11 +62,11 @@ router.post('/:shareId/access', async (req, res, next) => {
     }
 });
 
-// List project shares
-router.get('/project/:projectId', async (req, res, next) => {
+// List project shares (requires authentication)
+router.get('/project/:projectId', checkAuth, async (req, res, next) => {
     try {
         const { projectId } = req.params;
-        const userId = req.query.userId;
+        const userId = req.userId; // From auth middleware
 
         const result = await sharesService.listProjectShares(projectId, userId);
         res.json(result);
@@ -74,11 +75,11 @@ router.get('/project/:projectId', async (req, res, next) => {
     }
 });
 
-// Revoke share
-router.delete('/:shareId', async (req, res, next) => {
+// Revoke share (requires authentication)
+router.delete('/:shareId', checkAuth, async (req, res, next) => {
     try {
         const { shareId } = req.params;
-        const userId = req.body.userId;
+        const userId = req.userId; // From auth middleware
 
         const result = await sharesService.revokeShare(shareId, userId);
         res.json(result);
@@ -87,7 +88,7 @@ router.delete('/:shareId', async (req, res, next) => {
     }
 });
 
-// Validate share
+// Validate share (public endpoint - no auth required)
 router.get('/:shareId/validate', async (req, res, next) => {
     try {
         const { shareId } = req.params;
@@ -100,14 +101,15 @@ router.get('/:shareId/validate', async (req, res, next) => {
         const result = await sharesService.validateShare(shareId, token);
         res.json(result);
     } catch (error) {
-        next(error);
+        console.error("Error validating share:", error);
+        res.status(400).json({ error: error.message, valid: false, reason: error.message });
     }
 });
 
-// Get shares for current user (projects shared with me)
-router.get('/user/me', async (req, res, next) => {
+// Get shares for current user - projects shared with me (requires authentication)
+router.get('/user/me', checkAuth, async (req, res, next) => {
     try {
-        const userId = req.query.userId;
+        const userId = req.userId; // From auth middleware
 
         const result = await sharesService.getUserShares(userId);
         res.json(result);
@@ -116,10 +118,10 @@ router.get('/user/me', async (req, res, next) => {
     }
 });
 
-// Get dashboard
-router.get('/dashboard', async (req, res, next) => {
+// Get dashboard (requires authentication)
+router.get('/dashboard', checkAuth, async (req, res, next) => {
     try {
-        const userId = req.query.userId;
+        const userId = req.userId; // From auth middleware
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
 
@@ -127,23 +129,6 @@ router.get('/dashboard', async (req, res, next) => {
         res.json(result);
     } catch (error) {
         next(error);
-    }
-});
-
-/**
- * Validate share
- */
-router.get("/:shareId/validate", async (req, res) => {
-    try {
-        const { shareId } = req.params;
-        const { token } = req.query;
-        if (!token) return res.status(400).json({ error: "Token is required" });
-
-        const result = await Shares.validateShare(shareId, token);
-        res.json(result);
-    } catch (err) {
-        console.error("Error validating share:", err);
-        res.status(400).json({ error: err.message, valid: false, reason: err.message });
     }
 });
 

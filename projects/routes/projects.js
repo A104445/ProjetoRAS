@@ -278,6 +278,107 @@ function process_msg() {
   });
 }
 
+// =============== INTERNAL ENDPOINTS (for inter-service communication) ===============
+
+/**
+ * Get project by ID only (internal use)
+ * This endpoint is for internal service-to-service communication
+ * Should NOT be exposed through the API Gateway to external clients
+ */
+router.get("/internal/project/:projectId", async (req, res, next) => {
+  try {
+    const project = await Project.getById(req.params.projectId);
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    res.status(200).json(project);
+  } catch (error) {
+    console.error("Error fetching project by ID:", error);
+    res.status(500).json({ error: "Error fetching project" });
+  }
+});
+
+/**
+ * Verify project ownership (internal use)
+ */
+router.get("/internal/project/:projectId/owner/:userId", async (req, res, next) => {
+  try {
+    const project = await Project.getById(req.params.projectId);
+    if (!project) {
+      return res.status(404).json({ exists: false, isOwner: false });
+    }
+    const isOwner = project.user_id.toString() === req.params.userId;
+    res.status(200).json({
+      exists: true,
+      isOwner,
+      projectName: project.name,
+      userId: project.user_id.toString()
+    });
+  } catch (error) {
+    console.error("Error verifying ownership:", error);
+    res.status(500).json({ error: "Error verifying ownership" });
+  }
+});
+
+/**
+ * Add permission to project (internal use)
+ * Called by shares service when user accesses a share
+ * @body { userId: string, role: "edit" | "view" }
+ */
+router.post("/internal/project/:projectId/permissions", async (req, res, next) => {
+  try {
+    const { userId, role } = req.body;
+    if (!userId || !role) {
+      return res.status(400).json({ error: "userId and role are required" });
+    }
+
+    const result = await Project.addPermission(req.params.projectId, userId, role);
+    if (!result) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    console.log(`Permission added: user ${userId} as ${role} to project ${req.params.projectId}`);
+    res.status(200).json({ success: true, project: result });
+  } catch (error) {
+    console.error("Error adding permission:", error);
+    res.status(500).json({ error: "Error adding permission" });
+  }
+});
+
+/**
+ * Remove permission from project (internal use)
+ * @body { userId: string }
+ */
+router.delete("/internal/project/:projectId/permissions/:userId", async (req, res, next) => {
+  try {
+    const result = await Project.removePermission(req.params.projectId, req.params.userId);
+    if (!result) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    console.log(`Permission removed: user ${req.params.userId} from project ${req.params.projectId}`);
+    res.status(200).json({ success: true });
+  } catch (error) {
+    console.error("Error removing permission:", error);
+    res.status(500).json({ error: "Error removing permission" });
+  }
+});
+
+/**
+ * Check permission for project (internal use)
+ */
+router.get("/internal/project/:projectId/permissions/:userId", async (req, res, next) => {
+  try {
+    const result = await Project.checkPermission(req.params.projectId, req.params.userId);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error checking permission:", error);
+    res.status(500).json({ error: "Error checking permission" });
+  }
+});
+
+// =============== END INTERNAL ENDPOINTS ===============
+
 // Get list of all projects from a user
 router.get("/:user", (req, res, next) => {
   Project.getAll(req.params.user)
@@ -300,6 +401,11 @@ router.get("/:user", (req, res, next) => {
 router.get("/:user/:project", (req, res, next) => {
   Project.getOne(req.params.user, req.params.project)
     .then(async (project) => {
+      // Check if project was found
+      if (!project) {
+        return res.status(404).jsonp({ error: "Project not found or access denied" });
+      }
+
       const response = {
         _id: project._id,
         name: project.name,

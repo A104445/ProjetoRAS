@@ -12,11 +12,19 @@ const imgSchema = new mongoose.Schema({
   og_img_key: { type: String, required: true },
 });
 
+// Permissions structure: { editors: [userIds], viewers: [userIds] }
+const permissionsSchema = new mongoose.Schema({
+  editors: { type: [mongoose.Schema.Types.ObjectId], default: [] },
+  viewers: { type: [mongoose.Schema.Types.ObjectId], default: [] },
+}, { _id: false });
+
 const projectSchema = new mongoose.Schema({
   name: { type: String, required: true },
-  user_id: { type: mongoose.Schema.Types.ObjectId, required: true }, // Maybe mudar para falso por causa de users anónimos, ou procurar alguma solução
+  user_id: { type: mongoose.Schema.Types.ObjectId, required: true }, // Owner
   imgs: { type: [imgSchema], default: [] },
   tools: { type: [toolSchema], default: [] },
+  permissions: { type: permissionsSchema, default: { editors: [], viewers: [] } },
 });
 
 module.exports = mongoose.model("project", projectSchema);
+

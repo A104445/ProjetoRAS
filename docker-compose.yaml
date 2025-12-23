@@ -276,7 +276,6 @@ services:
       - elk
     volumes:
       - ./shares:/app
-      - /app/node_modules
     develop:
       watch:
         - action: sync

@@ -60,25 +60,48 @@ export default function ShareAccessPage() {
     const handleAccess = async () => {
         try {
             setLoading(true);
-            const response = await api.post(`/shares/${shareId}/access`, { token });
+
+            // Get JWT from localStorage session
+            const storedSession = localStorage.getItem("session");
+            let jwtToken = "";
+            if (storedSession) {
+                try {
+                    const session = JSON.parse(storedSession);
+                    jwtToken = session?.token || "";
+                } catch (e) {
+                    console.error("Error parsing session:", e);
+                }
+            }
+
+            if (!jwtToken) {
+                toast({
+                    title: "Error",
+                    description: "Please login to access this project",
+                    variant: "destructive",
+                });
+                router.push("/login");
+                return;
+            }
+
+            const response = await api.post(
+                `/shares/${shareId}/access`,
+                { token }, // share token
+                {
+                    headers: {
+                        Authorization: `Bearer ${jwtToken}`, // JWT token
+                    },
+                }
+            );
 
             if (response.data && response.data.projectData) {
                 const projectId = response.data.projectData._id;
-                // Use window.location to strictly force a reload/navigation if needed, 
-                // but router.push is better for SPA.
-                // We might need to store the session token returned? 
-                // The shares service returns { sessionId, ... }. 
-                // The frontend might need to store this sessionId to authorize subsequent requests.
-                // For now, let's just go to the project.
-
-                // TODO: Store session/share access token if required by project editor components
-
                 router.push(`/dashboard/${projectId}`);
             } else {
                 router.push("/dashboard");
             }
 
         } catch (err) {
+            console.error("Access error:", err);
             toast({
                 title: "Error",
                 description: "Failed to access project",

@@ -1,6 +1,7 @@
 const { getRedis } = require('../config/redis');
 const ProjectLock = require('../models/ProjectLock');
 const mongoose = require('mongoose');
+const notifications = require('./notificationService');
 
 class LockManager {
     constructor() {
@@ -79,6 +80,9 @@ class LockManager {
             });
             await redis.expire(`lock:${projectId}`, 10 * 60); // TTL 10 minutes
 
+            // Notify all clients about lock acquisition
+            await notifications.notifyLockAcquired(projectId, userId, userName);
+
             return { lockGranted: true, expiresAt: new Date(now + 7 * 60 * 1000) };
         }
 
@@ -122,6 +126,9 @@ class LockManager {
         await redis.del(`lock:${projectId}`);
         await redis.del(`lock:${projectId}:heartbeat`);
 
+        // Notify about lock release
+        await notifications.notifyLockReleased(projectId, userId);
+
         // 4. Promote next in queue
         const nextInQueue = lock.editQueue?.[0];
         if (nextInQueue) {
@@ -152,6 +159,8 @@ class LockManager {
 
             // Update lastActivity in Redis
             await redis.hSet(`lock:${projectId}`, 'lastActivity', Date.now().toString());
+            // Reset inactivity warning
+            await redis.hSet(`lock:${projectId}`, 'inactivityWarningSent', 'false');
 
             return { success: true };
         } catch (error) {
@@ -162,6 +171,25 @@ class LockManager {
 
     // Add to queue
     async addToQueue(projectId, userId, userName, sessionId) {
+        // Check if user is already in queue
+        const existingLock = await ProjectLock.findOne({
+            projectId: new mongoose.Types.ObjectId(projectId),
+            'editQueue.userId': new mongoose.Types.ObjectId(userId)
+        });
+
+        if (existingLock) {
+            const existingPosition = existingLock.editQueue.findIndex(
+                q => q.userId.toString() === userId
+            ) + 1;
+            return {
+                lockGranted: false,
+                position: existingPosition,
+                estimatedWaitTime: existingPosition * 5 * 60,
+                currentEditor: existingLock.editorName,
+                alreadyInQueue: true
+            };
+        }
+
         const lock = await ProjectLock.findOneAndUpdate(
             { projectId: new mongoose.Types.ObjectId(projectId) },
             {
@@ -194,6 +222,9 @@ class LockManager {
 
             const position = lock.editQueue.length;
             const estimatedWait = position * 5 * 60; // 5 min per position
+
+            // Notify about queue update
+            await notifications.notifyQueueUpdate(projectId, lock.editQueue);
 
             return {
                 lockGranted: false,
@@ -228,6 +259,9 @@ class LockManager {
                 { projectId: new mongoose.Types.ObjectId(projectId) },
                 { $set: { editQueue: lock.editQueue } }
             );
+
+            // Notify about queue update
+            await notifications.notifyQueueUpdate(projectId, lock.editQueue);
         }
 
         return { success: true };
@@ -258,7 +292,13 @@ class LockManager {
                     inactivityWarningSent: 'true',
                     warningExpiresAt: (now + 2 * 60 * 1000).toString()
                 });
-                // TODO: Send WebSocket notification
+
+                // Send WebSocket notification
+                await notifications.notifyInactivityWarning(
+                    projectId,
+                    lock.editorSessionId,
+                    120 // 2 minutes to respond
+                );
             }
 
             // 7 minutes - expire lock
@@ -281,10 +321,12 @@ class LockManager {
                 sessionId: mongoLock.editorSessionId
             };
 
+            // Notify about lock expiration before releasing
+            await notifications.notifyLockExpired(projectId, oldEditor.sessionId, reason);
+
             await this.releaseLock(projectId, oldEditor.userId);
 
             console.log(`🔓 Lock expired for project ${projectId}, reason: ${reason}`);
-            // TODO: Notify via WebSocket
         }
     }
 
@@ -324,9 +366,13 @@ class LockManager {
                 console.warn(`⚠️  Inconsistency detected in project ${projectId}, MongoDB wins`);
                 await this.syncLockToRedis(projectId, mongoLock);
 
-                // Notify client with "phantom" lock
+                // Notify client with "phantom" lock that they lost it
                 if (redisLock.editorId && redisLock.editorId !== mongoLock.editorId.toString()) {
-                    // TODO: Notify via WebSocket that lock was lost
+                    await notifications.notifyLockLost(
+                        projectId,
+                        redisLock.editorSessionId,
+                        'reconciliation'
+                    );
                 }
             }
         }
@@ -379,7 +425,14 @@ class LockManager {
             { $pull: { editQueue: { userId: nextUser.userId } } }
         );
 
-        // TODO: Notify via WebSocket
+        // Notify user about promotion
+        await notifications.notifyUserPromoted(
+            projectId,
+            nextUser.userId.toString(),
+            nextUser.userName,
+            nextUser.sessionId
+        );
+
         console.log(`🎉 Promoted ${nextUser.userName} to editor for project ${projectId}`);
     }
 

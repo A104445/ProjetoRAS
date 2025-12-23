@@ -1,6 +1,6 @@
 var createError = require("http-errors");
 var express = require("express");
-var cors = require("cors"); // Import cors
+var cors = require("cors");
 var path = require("path");
 var cookieParser = require("cookie-parser");
 var logger = require("morgan");
@@ -8,6 +8,7 @@ var projectsRouter = require("./routes/projects");
 var usersRouter = require("./routes/users");
 var subscriptionsRouter = require("./routes/subscriptions");
 var sharesRouter = require("./routes/shares");
+
 var app = express();
 
 // Enable CORS for all routes
@@ -23,24 +24,92 @@ app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, "public")));
 
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "ok", service: "api-gateway" });
+});
+
+// Routes
 app.use("/projects", projectsRouter);
 app.use("/users", usersRouter);
 app.use("/subscriptions", subscriptionsRouter);
 app.use("/shares", sharesRouter);
 
-// catch 404 and forward to error handler
+// Catch 404 and forward to error handler
 app.use(function (req, res, next) {
-  next(createError(404));
+  next(createError(404, `Route not found: ${req.method} ${req.originalUrl}`));
 });
 
-// error handler
+// Global error handler
 app.use(function (err, req, res, next) {
-  // set locals, only providing error in development
-  res.locals.message = err.message;
-  res.locals.error = req.app.get("env") === "development" ? err : {};
+  // Determine status code
+  const statusCode = err.status || err.statusCode || 500;
 
-  // render the error page
-  res.status(err.status || 500).jsonp(err);
+  // Log error details
+  const errorLog = {
+    timestamp: new Date().toISOString(),
+    method: req.method,
+    url: req.originalUrl,
+    status: statusCode,
+    message: err.message,
+    ...(process.env.NODE_ENV !== "production" && { stack: err.stack }),
+  };
+
+  // Log to console (will be captured by docker logs)
+  if (statusCode >= 500) {
+    console.error("Server Error:", JSON.stringify(errorLog, null, 2));
+  } else if (statusCode >= 400) {
+    console.warn("Client Error:", JSON.stringify(errorLog, null, 2));
+  }
+
+  // Build response object
+  const errorResponse = {
+    error: true,
+    status: statusCode,
+    message: err.message || getDefaultMessage(statusCode),
+    ...(statusCode === 404 && {
+      path: req.originalUrl,
+      method: req.method
+    }),
+    ...(process.env.NODE_ENV !== "production" && statusCode >= 500 && {
+      stack: err.stack
+    }),
+  };
+
+  // Send JSON response
+  res.status(statusCode).json(errorResponse);
+});
+
+// Helper function for default error messages
+function getDefaultMessage(statusCode) {
+  const messages = {
+    400: "Bad Request",
+    401: "Unauthorized",
+    403: "Forbidden",
+    404: "Not Found",
+    405: "Method Not Allowed",
+    408: "Request Timeout",
+    409: "Conflict",
+    422: "Unprocessable Entity",
+    429: "Too Many Requests",
+    500: "Internal Server Error",
+    502: "Bad Gateway",
+    503: "Service Unavailable",
+    504: "Gateway Timeout",
+  };
+  return messages[statusCode] || "An error occurred";
+}
+
+// Handle uncaught exceptions
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught Exception:", err);
+  // Give time for logs to be written
+  setTimeout(() => process.exit(1), 1000);
+});
+
+// Handle unhandled promise rejections
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
 });
 
 module.exports = app;
