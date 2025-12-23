@@ -95,7 +95,9 @@ export default function ShareAccessPage() {
 
             if (response.data && response.data.projectData) {
                 const projectId = response.data.projectData._id;
-                router.push(`/dashboard/${projectId}`);
+                const permission = response.data.permission; // "view" or "edit"
+                // Redirect to shared project view with permission info
+                router.push(`/dashboard/shared/${projectId}?permission=${permission}`);
             } else {
                 router.push("/dashboard");
             }

@@ -26,6 +26,27 @@ const upload = multer({ storage: storage });
 const projectsURL = "https://projects:9001/";
 const SHARES_SERVICE = process.env.SHARES_SERVICE_URL || "https://shares:9003";
 
+// --- Shared Project Route (for collaborators) ---
+
+/**
+ * Get a shared project (for viewers/editors who are not owners)
+ * Uses the project owner's ID for MinIO calls internally
+ */
+router.get("/shared/:projectId", auth.checkAuth, function (req, res, next) {
+  axios
+    .get(projectsURL + `shared/${req.params.projectId}`, {
+      params: { userId: req.userId },
+      httpsAgent: httpsAgent,
+    })
+    .then((resp) => res.status(200).jsonp(resp.data))
+    .catch((err) => {
+      console.error("Error fetching shared project:", err.response?.data || err.message);
+      const status = err.response?.status || 500;
+      const message = err.response?.data?.error || "Error fetching shared project";
+      res.status(status).jsonp({ error: message });
+    });
+});
+
 // --- Share Routes (Nested under /projects) ---
 
 /**

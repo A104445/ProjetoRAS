@@ -137,10 +137,10 @@ export default function ProjectList() {
                 <SidebarMenuItem key={share.shareId}>
                   <SidebarMenuButton
                     asChild
-                    isActive={path.includes(`/dashboard/${share.projectId}`)}
+                    isActive={path.includes(`/dashboard/shared/${share.projectId}`)}
                     className="h-fit py-1 flex items-center"
                   >
-                    <Link href={`/dashboard/${share.projectId}`}>
+                    <Link href={`/dashboard/shared/${share.projectId}?permission=${share.permission}`}>
                       {share.projectName}
                     </Link>
                   </SidebarMenuButton>

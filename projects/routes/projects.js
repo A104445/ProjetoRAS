@@ -379,6 +379,78 @@ router.get("/internal/project/:projectId/permissions/:userId", async (req, res, 
 
 // =============== END INTERNAL ENDPOINTS ===============
 
+/**
+ * Get a shared project (for collaborators - viewers/editors)
+ * This endpoint uses the project's owner ID for MinIO calls
+ * The collaborator's userId should be passed in query params for permission check
+ */
+router.get("/shared/:projectId", async (req, res, next) => {
+  try {
+    const { projectId } = req.params;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId query parameter is required" });
+    }
+
+    // Get project by ID first
+    const project = await Project.getById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    // Check permissions
+    const permCheck = await Project.checkPermission(projectId, userId);
+    if (!permCheck.hasAccess) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    // Use the project owner's ID for MinIO calls
+    const ownerId = project.user_id.toString();
+
+    const response = {
+      _id: project._id,
+      name: project.name,
+      tools: project.tools,
+      imgs: [],
+      _accessRole: permCheck.role, // Include role info
+    };
+
+    console.log("DEBUG /shared/:projectId - Project owner:", ownerId);
+    console.log("DEBUG /shared/:projectId - Number of images:", project.imgs?.length || 0);
+
+    for (let img of project.imgs) {
+      try {
+        console.log("DEBUG /shared/:projectId - Getting image:", img.og_img_key);
+        console.log("DEBUG /shared/:projectId - Calling MinIO with ownerId:", ownerId, "projectId:", projectId);
+        const resp = await get_image_host(
+          ownerId,        // Use owner ID for MinIO
+          projectId,
+          "src",
+          img.og_img_key
+        );
+        const url = resp.data.url;
+        console.log("DEBUG /shared/:projectId - Got URL:", url?.substring(0, 50) + "...");
+
+        response["imgs"].push({
+          _id: img._id,
+          name: path.basename(img.og_uri),
+          url: url,
+        });
+      } catch (err) {
+        console.error("DEBUG /shared/:projectId - Error getting image URL:", err.message);
+        console.error("DEBUG /shared/:projectId - Full error:", err.response?.data || err);
+        // Continue with other images instead of failing completely
+      }
+    }
+
+    res.status(200).json(response);
+  } catch (error) {
+    console.error("Error in GET /shared/:projectId:", error);
+    res.status(500).json({ error: "Error fetching shared project" });
+  }
+});
+
 // Get list of all projects from a user
 router.get("/:user", (req, res, next) => {
   Project.getAll(req.params.user)

@@ -256,11 +256,19 @@ class SharesService {
 
     // List shares for a project
     async listProjectShares(projectId, userId) {
-        // Verify ownership via API
+        // First check if user is owner
         const ownershipResult = await ProjectsAPI.verifyProjectOwnership(projectId, userId);
 
-        if (!ownershipResult.exists || !ownershipResult.isOwner) {
-            const error = new Error('Project not found or you are not the owner');
+        let hasAccess = ownershipResult.exists && ownershipResult.isOwner;
+
+        // If not owner, check if user has editor permission
+        if (!hasAccess && ownershipResult.exists) {
+            const permResult = await ProjectsAPI.checkPermission(projectId, userId);
+            hasAccess = permResult.hasAccess && permResult.role === 'editor';
+        }
+
+        if (!hasAccess) {
+            const error = new Error('Project not found or you do not have permission to view shares');
             error.status = 403;
             throw error;
         }

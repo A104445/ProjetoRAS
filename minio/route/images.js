@@ -9,6 +9,12 @@ const router = express.Router();
 router.get("/docker/:userId/:projectId/:stage/:imageName", async (req, res) => {
   const { userId, projectId, stage, imageName } = req.params;
 
+  console.log("DEBUG MinIO Docker Request:");
+  console.log("  userId:", userId);
+  console.log("  projectId:", projectId);
+  console.log("  stage:", stage);
+  console.log("  imageName:", imageName);
+
   if (!["src", "preview", "out"].includes(stage)) {
     return res
       .status(400)
@@ -22,14 +28,24 @@ router.get("/docker/:userId/:projectId/:stage/:imageName", async (req, res) => {
       stage,
       imageName,
     );
+    console.log("DEBUG MinIO Docker - Success, URL generated");
     res.status(200).json({ url });
   } catch (error) {
+    console.error("DEBUG MinIO Docker - Error:", error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
 router.get("/host/:userId/:projectId/:stage/:imageName", async (req, res) => {
   const { userId, projectId, stage, imageName } = req.params;
+
+  console.log("DEBUG MinIO Host Request:");
+  console.log("  userId:", userId);
+  console.log("  projectId:", projectId);
+  console.log("  stage:", stage);
+  console.log("  imageName:", imageName);
+  console.log("  Bucket will be: user-" + userId);
+  console.log("  Key will be:", `${projectId}/${stage}/${imageName}`);
 
   if (!["src", "preview", "out"].includes(stage)) {
     return res
@@ -39,11 +55,14 @@ router.get("/host/:userId/:projectId/:stage/:imageName", async (req, res) => {
 
   try {
     const url = await getPresignedUrlHost(userId, projectId, stage, imageName);
-    
+    console.log("DEBUG MinIO Host - Success, URL generated:", url.substring(0, 50) + "...");
     res.status(200).json({ url });
   } catch (error) {
+    console.error("DEBUG MinIO Host - Error:", error.message);
+    console.error("DEBUG MinIO Host - Full error:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
 module.exports = router;
+
