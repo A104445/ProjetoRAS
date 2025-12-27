@@ -44,11 +44,6 @@ services:
       - api_gateway
       - ws_gateway
       - minio
-    develop:
-      watch:
-        - action: sync+restart
-          path: ./nginx/nginx.conf
-          target: /etc/nginx/nginx.conf
 
   minio:
     image: quay.io/minio/minio:RELEASE.2024-05-28T17-19-04Z
@@ -82,16 +77,6 @@ services:
       FRONTEND_URL: "http://localhost:8080"
     networks:
       - elk
-    volumes:
-      - ./minio:/app
-      - /app/node_modules
-    develop:
-      watch:
-        - action: sync
-          path: ./minio
-          target: /app
-          ignore:
-            - node_modules/
 
   rabbitmq:
     build:
@@ -110,28 +95,6 @@ services:
       test: ["CMD-SHELL", "rabbitmqctl status"]
       interval: 30s
       timeout: 10s
-      retries: 5
-    networks:
-      - elk
-
-  redis:
-    image: redis:7-alpine
-    container_name: picturas-redis
-    restart: on-failure
-    ports:
-      - "6379:6379"
-    command: >
-      redis-server
-      --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
-      --appendonly yes
-      --appendfsync everysec
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
       retries: 5
     networks:
       - elk
@@ -173,16 +136,7 @@ services:
     networks:
       - elk
     volumes:
-      - ./projects:/app
-      - /app/node_modules
       - image_data:/app/images
-    develop:
-      watch:
-        - action: sync
-          path: ./projects
-          target: /app
-          ignore:
-            - node_modules/
 
   users_mongoDB:
     image: mongo:4.4
@@ -217,13 +171,6 @@ services:
     volumes:
       - ./users:/app
       - /app/node_modules
-    develop:
-      watch:
-        - action: sync
-          path: ./users
-          target: /app
-          ignore:
-            - node_modules/
 
   subscriptions_mongoDB:
     image: mongo:4.4
@@ -238,6 +185,45 @@ services:
       retries: 5
     volumes:
       - subscription_data:/data/db
+
+  subscriptions:
+    build: ./subscriptions
+    container_name: picturas-subscriptions-ms
+    depends_on:
+      - subscriptions_mongoDB
+      - users
+    ports:
+      - "11001:11001"
+    restart: on-failure
+    environment:
+      - SECRET_KEY=card_secret_key
+    networks:
+      - elk
+    volumes:
+      - ./subscriptions:/app
+      - /app/node_modules
+
+  redis:
+    image: redis:7-alpine
+    container_name: picturas-redis
+    restart: on-failure
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - elk
 
   shares_mongoDB:
     image: mongo:4.4
@@ -276,37 +262,7 @@ services:
       - elk
     volumes:
       - ./shares:/app
-    develop:
-      watch:
-        - action: sync
-          path: ./shares
-          target: /app
-          ignore:
-            - node_modules/
-
-  subscriptions:
-    build: ./subscriptions
-    container_name: picturas-subscriptions-ms
-    depends_on:
-      - subscriptions_mongoDB
-      - users
-    ports:
-      - "11001:11001"
-    restart: on-failure
-    environment:
-      - SECRET_KEY=card_secret_key
-    networks:
-      - elk
-    volumes:
-      - ./subscriptions:/app
       - /app/node_modules
-    develop:
-      watch:
-        - action: sync
-          path: ./subscriptions
-          target: /app
-          ignore:
-            - node_modules/
 
   api_gateway:
     build: ./apiGateway
@@ -324,13 +280,6 @@ services:
     volumes:
       - ./apiGateway:/app
       - /app/node_modules
-    develop:
-      watch:
-        - action: sync
-          path: ./apiGateway
-          target: /app
-          ignore:
-            - node_modules/
 
   bg_remove_ai_tool:
     build:
@@ -557,14 +506,6 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
-    develop:
-      watch:
-        - action: sync
-          path: ./frontend
-          target: /app
-          ignore:
-            - node_modules/
-            - .next/
 
   ws_gateway:
     build: ./wsGateway
@@ -582,16 +523,6 @@ services:
       - RABBITMQ_USER=user
       - RABBITMQ_PASS=password
       - JWT_SECRET_KEY=lisan_al_gaib
-    volumes:
-      - ./wsGateway:/app
-      - /app/node_modules
-    develop:
-      watch:
-        - action: sync
-          path: ./wsGateway
-          target: /app
-          ignore:
-            - node_modules/
 
 networks:
   elk:

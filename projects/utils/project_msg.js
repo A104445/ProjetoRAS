@@ -30,7 +30,7 @@ function send_msg_tool(msg_id, timestamp, og_img_uri, new_img_uri, tool, params)
         "parameters": {
             "inputImageURI": og_img_uri,
             "outputImageURI": new_img_uri,
-            ... params
+            ...params
         }
     };
 
@@ -90,8 +90,31 @@ function send_msg_client_preview_error(msg_id, timestamp, user, error_code, erro
     send_rabbit_msg(msg, queue);
 }
 
-function read_msg(callback){
+function read_msg(callback) {
     read_rabbit_msg(queues['project'], callback);
 }
 
-module.exports = { send_msg_tool, send_msg_client, send_msg_client_error, send_msg_client_preview, send_msg_client_preview_error, read_msg };
+function send_project_update(projectId, updateType, data = {}) {
+    const queue = queues['ws'];
+    const msg = {
+        "messageId": `project-update-${Date.now()}`,
+        "timestamp": new Date().toISOString(),
+        "type": "project-update",
+        "projectId": projectId,
+        "updateType": updateType,
+        "data": data
+    };
+
+    send_rabbit_msg(msg, queue);
+    console.log(`Published project update: ${updateType} for ${projectId}`);
+}
+
+module.exports = {
+    send_msg_tool,
+    send_msg_client,
+    send_msg_client_error,
+    send_msg_client_preview,
+    send_msg_client_preview_error,
+    read_msg,
+    send_project_update
+};

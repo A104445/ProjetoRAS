@@ -149,8 +149,8 @@ export function ProjectImageList({
           // Grid view
           <div className="size-full flex flex-col items-center">
             {(mode === "edit" && project.imgs.length > 0) ||
-            (mode === "results" &&
-              (results.imgs.length > 0 || results.texts.length > 0)) ? (
+              (mode === "results" &&
+                (results.imgs.length > 0 || results.texts.length > 0)) ? (
               <>
                 {mode !== "results" && (
                   <div className="relative pt-4 pb-2 text-gray-500 text-sm after:h-2 after:bg-gradient-to-b after:from-background after:to-background/10 after:w-full after:absolute after:bottom-0 after:translate-y-2 after:z-50 w-full text-center flex flex-col">
@@ -161,7 +161,7 @@ export function ProjectImageList({
                   {(mode === "results" ? results.imgs : project.imgs).map(
                     (image, index) => (
                       <button
-                        key={image._id}
+                        key={image._id || image.og_img_id || `img-${index}`}
                         className="aspect-square"
                         onClick={() => {
                           setJumpTo(index);

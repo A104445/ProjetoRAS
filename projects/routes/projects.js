@@ -21,6 +21,7 @@ const {
   send_msg_client_preview,
   send_msg_client_preview_error,
   read_msg,
+  send_project_update,
 } = require("../utils/project_msg");
 
 const Project = require("../controllers/project");
@@ -451,6 +452,249 @@ router.get("/shared/:projectId", async (req, res, next) => {
   }
 });
 
+/**
+ * Get results of a shared project (for collaborators)
+ * This endpoint uses the project's owner ID for MinIO calls
+ */
+router.get("/shared/:projectId/results", async (req, res, next) => {
+  try {
+    const { projectId } = req.params;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId query parameter is required" });
+    }
+
+    // Get project by ID first
+    const project = await Project.getById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    // Check permissions
+    const permCheck = await Project.checkPermission(projectId, userId);
+    if (!permCheck.hasAccess) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    // Use the project owner's ID for MinIO calls
+    const ownerId = project.user_id.toString();
+
+    const ans = {
+      'imgs': [],
+      'texts': []
+    };
+
+    const results = await Result.getAll(ownerId, projectId);
+
+    for (let r of results) {
+      try {
+        const resp = await get_image_host(
+          ownerId,  // Use owner ID for MinIO
+          projectId,
+          "out",
+          r.img_key
+        );
+        const url = resp.data.url;
+
+        if (r.type == 'text') ans.texts.push({ og_img_id: r.img_id, name: r.file_name, url: url });
+        else ans.imgs.push({ og_img_id: r.img_id, name: r.file_name, url: url });
+      } catch (err) {
+        console.error("Error getting result URL:", err.message);
+      }
+    }
+
+    res.status(200).json(ans);
+  } catch (error) {
+    console.error("Error in GET /shared/:projectId/results:", error);
+    res.status(500).json({ error: "Error fetching shared project results" });
+  }
+});
+
+// ==================== SHARED EDITOR ENDPOINTS ====================
+
+/**
+ * Add tool to shared project (editors only)
+ */
+router.post("/shared/:projectId/tool", async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId query parameter is required" });
+    }
+
+    // Check editor permission
+    const permCheck = await Project.checkPermission(projectId, userId);
+    if (!permCheck.hasAccess || permCheck.role !== 'edit') {
+      return res.status(403).json({ error: "Edit access required" });
+    }
+
+    // Validate tool data
+    if (!req.body.procedure || !req.body.params) {
+      return res.status(400).json({ error: "Tool requires procedure and params" });
+    }
+
+    // Get project
+    const project = await Project.getById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const ownerId = project.user_id.toString();
+
+    // Create tool
+    const tool = {
+      position: project.tools.length,
+      procedure: req.body.procedure,
+      params: req.body.params
+    };
+
+    project.tools.push(tool);
+
+    await Project.update(ownerId, projectId, project);
+
+    // Notify all viewers/editors
+    send_project_update(projectId, 'tool-added', { userId });
+
+    res.status(201).json({ success: true });
+  } catch (error) {
+    console.error("Error adding tool to shared project:", error);
+    res.status(500).json({ error: "Error adding tool" });
+  }
+});
+
+/**
+ * Update tool on shared project (editors only)
+ */
+router.put("/shared/:projectId/tool/:toolId", async (req, res) => {
+  try {
+    const { projectId, toolId } = req.params;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId query parameter is required" });
+    }
+
+    const permCheck = await Project.checkPermission(projectId, userId);
+    if (!permCheck.hasAccess || permCheck.role !== 'edit') {
+      return res.status(403).json({ error: "Edit access required" });
+    }
+
+    const project = await Project.getById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const ownerId = project.user_id.toString();
+
+    // Find and update tool
+    const toolIndex = project.tools.findIndex(t => t._id.toString() === toolId);
+    if (toolIndex === -1) {
+      return res.status(404).json({ error: "Tool not found" });
+    }
+
+    project.tools[toolIndex].params = req.body.params;
+
+    await Project.update(ownerId, projectId, project);
+
+    send_project_update(projectId, 'tool-updated', { userId, toolId });
+
+    res.sendStatus(204);
+  } catch (error) {
+    console.error("Error updating tool on shared project:", error);
+    res.status(500).json({ error: "Error updating tool" });
+  }
+});
+
+/**
+ * Delete tool from shared project (editors only)
+ */
+router.delete("/shared/:projectId/tool/:toolId", async (req, res) => {
+  try {
+    const { projectId, toolId } = req.params;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId query parameter is required" });
+    }
+
+    const permCheck = await Project.checkPermission(projectId, userId);
+    if (!permCheck.hasAccess || permCheck.role !== 'edit') {
+      return res.status(403).json({ error: "Edit access required" });
+    }
+
+    const project = await Project.getById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const ownerId = project.user_id.toString();
+
+    // Find and remove tool
+    const toolIndex = project.tools.findIndex(t => t._id.toString() === toolId);
+    if (toolIndex === -1) {
+      return res.status(404).json({ error: "Tool not found" });
+    }
+
+    const removedTool = project.tools[toolIndex];
+    project.tools.splice(toolIndex, 1);
+
+    // Update positions
+    for (let i = 0; i < project.tools.length; i++) {
+      if (project.tools[i].position > removedTool.position) {
+        project.tools[i].position--;
+      }
+    }
+
+    await Project.update(ownerId, projectId, project);
+
+    send_project_update(projectId, 'tool-deleted', { userId, toolId });
+
+    res.sendStatus(204);
+  } catch (error) {
+    console.error("Error deleting tool from shared project:", error);
+    res.status(500).json({ error: "Error deleting tool" });
+  }
+});
+
+/**
+ * Clear all tools from shared project (editors only)
+ */
+router.delete("/shared/:projectId/tools", async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId query parameter is required" });
+    }
+
+    const permCheck = await Project.checkPermission(projectId, userId);
+    if (!permCheck.hasAccess || permCheck.role !== 'edit') {
+      return res.status(403).json({ error: "Edit access required" });
+    }
+
+    const project = await Project.getById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const ownerId = project.user_id.toString();
+    project.tools = [];
+
+    await Project.update(ownerId, projectId, project);
+
+    send_project_update(projectId, 'tools-cleared', { userId });
+
+    res.sendStatus(204);
+  } catch (error) {
+    console.error("Error clearing tools from shared project:", error);
+    res.status(500).json({ error: "Error clearing tools" });
+  }
+});
+
 // Get list of all projects from a user
 router.get("/:user", (req, res, next) => {
   Project.getAll(req.params.user)
@@ -854,7 +1098,10 @@ router.post(
             });
 
             Project.update(req.params.user, req.params.project, project)
-              .then((_) => res.sendStatus(204))
+              .then((_) => {
+                send_project_update(req.params.project, 'image-added');
+                res.sendStatus(204);
+              })
               .catch((_) =>
                 res.status(503).jsonp(`Error updating project information`)
               );
@@ -903,7 +1150,10 @@ router.post("/:user/:project/tool", (req, res, next) => {
           project["tools"].push(tool);
 
           Project.update(req.params.user, req.params.project, project)
-            .then((_) => res.sendStatus(204))
+            .then((_) => {
+              send_project_update(req.params.project, 'tool-added');
+              res.sendStatus(204);
+            })
             .catch((_) =>
               res.status(503).jsonp(`Error updating project information`)
             );
@@ -1108,7 +1358,10 @@ router.put("/:user/:project/tool/:tool", (req, res, next) => {
         };
 
         Project.update(req.params.user, req.params.project, project)
-          .then((_) => res.sendStatus(204))
+          .then((_) => {
+            send_project_update(req.params.project, 'tool-updated');
+            res.sendStatus(204);
+          })
           .catch((_) =>
             res.status(503).jsonp(`Error updating project information`)
           );
@@ -1133,7 +1386,8 @@ router.delete("/:user/:project", (req, res, next) => {
         "src",
         img.og_img_key
       );
-      project["imgs"].remove(img); // Not really needed, but in case of error serves as reference point
+      const imgIndex = project["imgs"].findIndex(i => i._id.toString() === img._id.toString());
+      if (imgIndex !== -1) project["imgs"].splice(imgIndex, 1);
     }
 
     const results = await Result.getAll(req.params.user, req.params.project);
@@ -1167,7 +1421,11 @@ router.delete("/:user/:project/img/:img", (req, res, next) => {
   Project.getOne(req.params.user, req.params.project)
     .then(async (project) => {
       try {
-        const img = project["imgs"].filter((i) => i._id == req.params.img)[0];
+        const imgIndex = project["imgs"].findIndex((i) => i._id.toString() === req.params.img);
+        if (imgIndex === -1) {
+          return res.status(404).jsonp(`Image not found`);
+        }
+        const img = project["imgs"][imgIndex];
 
         await delete_image(
           req.params.user,
@@ -1175,7 +1433,7 @@ router.delete("/:user/:project/img/:img", (req, res, next) => {
           "src",
           img.og_img_key
         );
-        project["imgs"].remove(img);
+        project["imgs"].splice(imgIndex, 1);
 
         const results = await Result.getOne(
           req.params.user,
@@ -1218,7 +1476,10 @@ router.delete("/:user/:project/img/:img", (req, res, next) => {
         }
 
         Project.update(req.params.user, req.params.project, project)
-          .then((_) => res.sendStatus(204))
+          .then((_) => {
+            send_project_update(req.params.project, 'image-deleted');
+            res.sendStatus(204);
+          })
           .catch((_) =>
             res.status(503).jsonp(`Error updating project information`)
           );
@@ -1235,27 +1496,43 @@ router.delete("/:user/:project/tool/:tool", (req, res, next) => {
   Project.getOne(req.params.user, req.params.project)
     .then((project) => {
       try {
-        const tool = project["tools"].filter(
-          (i) => i._id == req.params.tool
-        )[0];
+        const toolIndex = project["tools"].findIndex(
+          (i) => i._id.toString() === req.params.tool
+        );
 
-        project["tools"].remove(tool);
+        if (toolIndex === -1) {
+          console.error(`Tool not found: ${req.params.tool}`);
+          return res.status(404).jsonp(`Tool not found`);
+        }
 
+        const removedTool = project["tools"][toolIndex];
+        project["tools"].splice(toolIndex, 1);
+
+        // Update positions for remaining tools
         for (let i = 0; i < project["tools"].length; i++) {
-          if (project["tools"][i].position > tool.position)
+          if (project["tools"][i].position > removedTool.position) {
             project["tools"][i].position--;
+          }
         }
 
         Project.update(req.params.user, req.params.project, project)
-          .then((_) => res.sendStatus(204))
-          .catch((_) =>
-            res.status(503).jsonp(`Error updating project information`)
-          );
-      } catch (_) {
+          .then((_) => {
+            send_project_update(req.params.project, 'tool-deleted');
+            res.sendStatus(204);
+          })
+          .catch((err) => {
+            console.error("Error updating project:", err);
+            res.status(503).jsonp(`Error updating project information`);
+          });
+      } catch (err) {
+        console.error("Error deleting tool:", err);
         res.status(400).jsonp(`Error deleting tool's information`);
       }
     })
-    .catch((_) => res.status(501).jsonp(`Error acquiring user's project`));
+    .catch((err) => {
+      console.error("Error getting project:", err);
+      res.status(501).jsonp(`Error acquiring user's project`);
+    });
 });
 
 module.exports = { router, process_msg };

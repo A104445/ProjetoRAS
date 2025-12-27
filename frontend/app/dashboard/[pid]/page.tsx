@@ -72,6 +72,14 @@ export default function Project({
   );
   const qc = useQueryClient();
 
+  // Lock state for owner
+  const [lockState, setLockState] = useState({
+    isLocked: false,
+    lockedBy: null as string | null,
+    hasLock: false,
+    expiresAt: null as number | null,
+  });
+
   useLayoutEffect(() => {
     if (
       !["edit", "results"].includes(mode) ||
@@ -80,6 +88,112 @@ export default function Project({
       router.replace(path);
     }
   }, [mode, view, path, router, projectResults.data]);
+
+  // Ticker to force re-render for countdown
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Join project room as owner and participate in locking
+  useEffect(() => {
+    if (!socket.data || !pid) return;
+
+    // Join the project room
+    socket.data.emit("join-project", pid);
+    console.log(`Owner joined project room: ${pid}`);
+
+    // Request lock as owner
+    socket.data.emit("request-lock", { projectId: pid });
+
+    // Clean up existing listeners first to prevent duplicates
+    socket.data.off("lock-acquired");
+    socket.data.off("lock-denied");
+    socket.data.off("project-locked");
+    socket.data.off("lock-released");
+    socket.data.off("project-updated");
+
+    // Handle lock events
+    socket.data.on("lock-acquired", () => {
+      console.log("Owner acquired lock");
+      setLockState({ isLocked: true, lockedBy: null, hasLock: true, expiresAt: Date.now() + 5 * 60 * 1000 });
+    });
+
+    socket.data.on("lock-denied", ({ lockedBy }: { lockedBy: string }) => {
+      console.log("Owner denied lock, held by:", lockedBy);
+      setLockState({ isLocked: true, lockedBy, hasLock: false, expiresAt: null });
+      toast({
+        title: "View-only mode",
+        description: "Another user is currently editing this project.",
+      });
+    });
+
+    socket.data.on("project-locked", ({ lockedBy }: { lockedBy: string }) => {
+      setLockState((prev: typeof lockState) => {
+        if (!prev.hasLock) {
+          return { isLocked: true, lockedBy, hasLock: false, expiresAt: null };
+        }
+        return prev;
+      });
+    });
+
+    socket.data.on("lock-released", () => {
+      console.log("Lock released, requesting...");
+      setLockState((prev: typeof lockState) => {
+        if (!prev.hasLock) {
+          socket.data.emit("request-lock", { projectId: pid });
+          return { isLocked: false, lockedBy: null, hasLock: false, expiresAt: null };
+        }
+        return prev;
+      });
+    });
+
+    socket.data.on("project-updated", ({ projectId, updateType }: { projectId: string; updateType: string }) => {
+      if (projectId === pid) {
+        console.log(`Owner received update: ${updateType}`);
+        qc.invalidateQueries({ queryKey: ["project", session.user._id, pid] });
+        qc.invalidateQueries({ queryKey: ["results", session.user._id, pid] });
+      }
+    });
+
+    socket.data.on("lock-extended", () => {
+      setLockState((prev: typeof lockState) => ({
+        ...prev,
+        expiresAt: Date.now() + 5 * 60 * 1000
+      }));
+    });
+
+    return () => {
+      socket.data.emit("leave-project", pid);
+      socket.data.emit("release-lock", { projectId: pid });
+      socket.data.off("lock-acquired");
+      socket.data.off("lock-denied");
+      socket.data.off("project-locked");
+      socket.data.off("lock-released");
+      socket.data.off("project-updated");
+      socket.data.off("lock-extended");
+    };
+  }, [socket.data, pid, toast, qc, session.user._id]);
+
+  // Auto-extend lock every 4 minutes
+  useEffect(() => {
+    if (!socket.data || !lockState.hasLock) return;
+
+    const interval = setInterval(() => {
+      socket.data.emit("extend-lock", { projectId: pid });
+    }, 4 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, [socket.data, pid, lockState.hasLock]);
+
+  // Helper function to broadcast project updates to shared viewers
+  const broadcastProjectUpdate = (updateType: string) => {
+    if (socket.data && pid) {
+      socket.data.emit("project-updated", { projectId: pid, updateType });
+      console.log(`Broadcasted project update: ${updateType}`);
+    }
+  };
 
   useEffect(() => {
     function onProcessUpdate() {
@@ -168,10 +282,17 @@ export default function Project({
           <div className="flex items-center justify-between w-full xl:w-auto gap-2">
             <h1 className="text-lg font-semibold truncate">
               {project.data.name}
+              <span className="ml-2 text-sm font-normal text-muted-foreground">
+                ({lockState.hasLock
+                  ? `Editing ${lockState.expiresAt ? Math.max(0, Math.ceil((lockState.expiresAt - Date.now()) / 1000)) + "s" : ""}`
+                  : lockState.isLocked
+                    ? "View only"
+                    : "Loading..."})
+              </span>
             </h1>
             <div className="flex items-center gap-2 xl:hidden">
               <ViewToggle />
-              <ModeToggle />
+              {lockState.hasLock && <ModeToggle />}
             </div>
           </div>
           <div className="flex items-center justify-between w-full xl:w-auto gap-2">
@@ -224,11 +345,13 @@ export default function Project({
                           token: session.token,
                         },
                         {
-                          onSuccess: () =>
+                          onSuccess: () => {
+                            broadcastProjectUpdate("tools-cleared");
                             toast({
                               title: "Project reset",
                               description: "All filters have been removed.",
-                            }),
+                            });
+                          },
                         },
                       );
                     }}
@@ -288,14 +411,31 @@ export default function Project({
               </Button>
               <div className="hidden xl:flex items-center gap-2">
                 <ViewToggle />
-                <ModeToggle />
+                {lockState.hasLock && <ModeToggle />}
               </div>
             </div>
           </div>
         </div>
+        {/* Lock status banner */}
+        {lockState.isLocked && !lockState.hasLock && (
+          <div className="bg-yellow-500/20 text-yellow-300 px-4 py-2 text-sm flex items-center gap-2">
+            <LoaderCircle className="size-4 animate-spin" />
+            {lockState.lockedBy
+              ? `Locked by user ${lockState.lockedBy.substring(0, 8)}... View-only mode. (${lockState.expiresAt ? Math.max(0, Math.ceil((lockState.expiresAt - Date.now()) / 1000)) + "s left" : "No time"})`
+              : "Another user is editing. View-only mode."}
+          </div>
+        )}
         {/* Main Content */}
         <div className="h-full overflow-x-hidden flex">
-          {mode !== "results" && <Toolbar />}
+          {lockState.hasLock ? (
+            mode !== "results" && <Toolbar />
+          ) : (
+            <div className="w-16 border-r flex flex-col items-center py-4 gap-4 opacity-50 grayscale pointer-events-none">
+              <div className="size-10 rounded bg-muted/20" />
+              <div className="size-10 rounded bg-muted/20" />
+              <div className="size-10 rounded bg-muted/20" />
+            </div>
+          )}
           <ProjectImageList
             setCurrentImageId={setCurrentImage}
             results={projectResults.data}
