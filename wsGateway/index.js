@@ -15,32 +15,95 @@ const io = socketIo(httpServer, {
 
 // ==================== LOCK MANAGEMENT ====================
 // In-memory lock storage: projectId -> { userId, expiresAt, timeoutId }
+// Queue storage: projectId -> [userId, userId, ...]
 const projectLocks = new Map();
+const lockQueues = new Map();
 
 function acquireLock(projectId, userId) {
     const existing = projectLocks.get(projectId);
 
-    if (existing && existing.expiresAt > Date.now()) {
-        // Lock exists and not expired
-        return { acquired: false, lockedBy: existing.userId };
+    // If lock is held by someone else who is not expired
+    if (existing && existing.expiresAt > Date.now() && existing.userId !== userId) {
+        // Enqueue if not already in queue
+        if (!lockQueues.has(projectId)) {
+            lockQueues.set(projectId, []);
+        }
+        const queue = lockQueues.get(projectId);
+        if (!queue.includes(userId)) {
+            queue.push(userId);
+            console.log(`User ${userId} added to lock queue for project ${projectId}. Position: ${queue.length}`);
+        }
+        return { acquired: false, lockedBy: existing.userId, queued: true, position: queue.indexOf(userId) + 1 };
     }
 
-    // Clear old timeout if exists
+    // Refresh if already held by same user
+    if (existing && existing.userId === userId) {
+        if (existing.timeoutId) clearTimeout(existing.timeoutId);
+        existing.expiresAt = Date.now() + 5 * 60 * 1000;
+        existing.timeoutId = setTimeout(() => {
+            handleLockExpiration(projectId);
+        }, 5 * 60 * 1000);
+        return { acquired: true, expiresAt: existing.expiresAt };
+    }
+
+    // Lock is free - acquire it
     if (existing?.timeoutId) {
         clearTimeout(existing.timeoutId);
     }
 
-    // Set new lock with 5 minute expiration
     const expiresAt = Date.now() + 5 * 60 * 1000;
     const timeoutId = setTimeout(() => {
-        console.log(`Lock expired for project: ${projectId}`);
-        projectLocks.delete(projectId);
-        io.to(`project:${projectId}`).emit('lock-released', { projectId });
+        handleLockExpiration(projectId);
     }, 5 * 60 * 1000);
 
     projectLocks.set(projectId, { userId, expiresAt, timeoutId });
     console.log(`Lock acquired by ${userId} for project: ${projectId}`);
+
+    // Remove from queue if they were in it
+    if (lockQueues.has(projectId)) {
+        const queue = lockQueues.get(projectId);
+        const idx = queue.indexOf(userId);
+        if (idx !== -1) {
+            queue.splice(idx, 1);
+        }
+    }
+
     return { acquired: true, expiresAt };
+}
+
+function handleLockExpiration(projectId) {
+    console.log(`Lock expired for project: ${projectId}`);
+    const lock = projectLocks.get(projectId);
+    if (lock) {
+        projectLocks.delete(projectId);
+        io.to(`project:${projectId}`).emit('lock-released', { projectId });
+
+        // Auto-assign to next in queue
+        processNextInQueue(projectId);
+    }
+}
+
+function processNextInQueue(projectId) {
+    if (lockQueues.has(projectId)) {
+        const queue = lockQueues.get(projectId);
+        if (queue.length > 0) {
+            const nextUserId = queue.shift(); // FIFO
+            console.log(`Auto-assigning lock to queued user ${nextUserId} for project ${projectId}`);
+
+            // Acquire lock for next user
+            const result = acquireLock(projectId, nextUserId);
+            if (result.acquired) {
+                // Notify the specific user they got the lock
+                io.to(nextUserId).emit('lock-acquired', { projectId });
+                // Notify everyone else
+                io.to(`project:${projectId}`).emit('project-locked', {
+                    projectId,
+                    lockedBy: nextUserId,
+                    expiresAt: result.expiresAt
+                });
+            }
+        }
+    }
 }
 
 function releaseLock(projectId, userId) {
@@ -49,8 +112,23 @@ function releaseLock(projectId, userId) {
         clearTimeout(existing.timeoutId);
         projectLocks.delete(projectId);
         console.log(`Lock released by ${userId} for project: ${projectId}`);
+
+        // Process queue immediately
+        processNextInQueue(projectId);
         return true;
     }
+
+    // Also allow removing oneself from queue if not holding lock
+    if (lockQueues.has(projectId)) {
+        const queue = lockQueues.get(projectId);
+        const idx = queue.indexOf(userId);
+        if (idx !== -1) {
+            queue.splice(idx, 1);
+            console.log(`User ${userId} removed from lock queue for project ${projectId}`);
+            return true; // Return true to signal "action handled"
+        }
+    }
+
     return false;
 }
 
@@ -60,9 +138,7 @@ function extendLock(projectId, userId) {
         clearTimeout(existing.timeoutId);
         existing.expiresAt = Date.now() + 5 * 60 * 1000;
         existing.timeoutId = setTimeout(() => {
-            console.log(`Lock expired for project: ${projectId}`);
-            projectLocks.delete(projectId);
-            io.to(`project:${projectId}`).emit('lock-released', { projectId });
+            handleLockExpiration(projectId);
         }, 5 * 60 * 1000);
         return true;
     }
@@ -114,11 +190,20 @@ function setupRabbitMQ() {
                     const error_code = msg_content.errorCode;
                     const error_msg = msg_content.errorMsg;
                     io.to(msg_content.user).emit("preview-error", JSON.stringify({ 'error_code': error_code, 'error_msg': error_msg }));
+                    // Also broadcast error to project room for shared users
+                    if (msg_content.projectId) {
+                        io.to(`project:${msg_content.projectId}`).emit("preview-error", JSON.stringify({ 'error_code': error_code, 'error_msg': error_msg }));
+                    }
                     return;
                 }
 
                 const img_url = msg_content.img_url;
+                // Emit to user room (for owner)
                 io.to(msg_content.user).emit("preview-ready", img_url);
+                // Also emit to project room (for shared users)
+                if (msg_content.projectId) {
+                    io.to(`project:${msg_content.projectId}`).emit("preview-ready", img_url);
+                }
             }
             // Handle process messages
             else if (/update-client-process/.test(msg_content.messageId)) {
@@ -126,10 +211,19 @@ function setupRabbitMQ() {
                     const error_code = msg_content.errorCode;
                     const error_msg = msg_content.errorMsg;
                     io.to(msg_content.user).emit("process-error", JSON.stringify({ 'error_code': error_code, 'error_msg': error_msg }));
+                    // Also broadcast error to project room for shared users
+                    if (msg_content.projectId) {
+                        io.to(`project:${msg_content.projectId}`).emit("process-error", JSON.stringify({ 'error_code': error_code, 'error_msg': error_msg }));
+                    }
                     return;
                 }
 
+                // Emit to user room (for owner)
                 io.to(msg_content.user).emit("process-update", msg_content.messageId);
+                // Also emit to project room (for shared users)
+                if (msg_content.projectId) {
+                    io.to(`project:${msg_content.projectId}`).emit("process-update", msg_content.messageId);
+                }
             }
         } catch (e) {
             console.error("Error processing RabbitMQ message:", e);
@@ -203,6 +297,8 @@ io.on("connection", (socket) => {
                 lockedBy: userId,
                 expiresAt: result.expiresAt
             });
+        } else if (result.queued) {
+            socket.emit('lock-queued', { projectId, position: result.position });
         } else {
             socket.emit('lock-denied', { projectId, lockedBy: result.lockedBy });
         }

@@ -13,7 +13,7 @@ import {
 } from "@/lib/queries/projects";
 import Loading from "@/components/loading";
 import { ProjectProvider } from "@/providers/project-provider";
-import { use, useEffect, useLayoutEffect, useState } from "react";
+import { use, useEffect, useLayoutEffect, useState, useRef } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useSession } from "@/providers/session-provider";
 import {
@@ -96,28 +96,81 @@ export default function Project({
     return () => clearInterval(timer);
   }, []);
 
-  // Join project room as owner and participate in locking
+  // Debugging dependencies
+  const prevSocketData = useRef(socket.data);
+  const prevPid = useRef(pid);
+  const prevQc = useRef(qc);
+  const prevUserId = useRef(session.user._id);
+
+  // Join project room as owner (stable connection)
+  const joinedRef = useRef(false);
   useEffect(() => {
     if (!socket.data || !pid) return;
 
-    // Join the project room
-    socket.data.emit("join-project", pid);
-    console.log(`Owner joined project room: ${pid}`);
+    // Log what changed
+    if (socket.data !== prevSocketData.current) {
+      console.log("Effect re-run due to: socket.data changed");
+      prevSocketData.current = socket.data;
+    }
+    if (pid !== prevPid.current) {
+      console.log("Effect re-run due to: pid changed");
+      prevPid.current = pid;
+    }
+    if (qc !== prevQc.current) {
+      console.log("Effect re-run due to: qc changed");
+      prevQc.current = qc;
+    }
+    if (session.user._id !== prevUserId.current) {
+      console.log("Effect re-run due to: user._id changed");
+      prevUserId.current = session.user._id;
+    }
 
-    // Request lock as owner
-    socket.data.emit("request-lock", { projectId: pid });
+    if (!joinedRef.current) {
+      console.log(`Owner joining project room: ${pid}`);
+      socket.data.emit("join-project", pid);
+      joinedRef.current = true;
+    }
 
-    // Clean up existing listeners first to prevent duplicates
+    // Clean up potential duplicate listeners before adding
+    socket.data.off("project-updated");
+
+    socket.data.on("project-updated", ({ projectId, updateType }: { projectId: string; updateType: string }) => {
+      if (projectId === pid) {
+        console.log(`Owner received update: ${updateType}`);
+        // Force immediate refetch instead of just invalidating
+        qc.refetchQueries({ queryKey: ["project", session.user._id, pid] });
+        qc.refetchQueries({ queryKey: ["results", session.user._id, pid] });
+      }
+    });
+
+    return () => {
+      if (socket.data) {
+        console.log("Owner connection cleanup");
+        socket.data.emit("leave-project", pid);
+        socket.data.off("project-updated");
+        joinedRef.current = false;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket.data, pid]);
+
+  // Lock Management Effect
+  useEffect(() => {
+    if (!socket.data || !pid || !joinedRef.current) return;
+
+    // Clean up before adding
     socket.data.off("lock-acquired");
     socket.data.off("lock-denied");
     socket.data.off("project-locked");
     socket.data.off("lock-released");
-    socket.data.off("project-updated");
+    socket.data.off("lock-extended");
 
-    // Handle lock events
+    // Request lock as owner immediately
+    socket.data.emit("request-lock", { projectId: pid });
+
     socket.data.on("lock-acquired", () => {
-      console.log("Owner acquired lock");
-      setLockState({ isLocked: true, lockedBy: null, hasLock: true, expiresAt: Date.now() + 5 * 60 * 1000 });
+      console.log("Lock acquired!");
+      setLockState((prev: typeof lockState) => ({ ...prev, isLocked: true, lockedBy: session.user._id, hasLock: true, expiresAt: Date.now() + 5 * 60 * 1000 }));
     });
 
     socket.data.on("lock-denied", ({ lockedBy }: { lockedBy: string }) => {
@@ -149,14 +202,6 @@ export default function Project({
       });
     });
 
-    socket.data.on("project-updated", ({ projectId, updateType }: { projectId: string; updateType: string }) => {
-      if (projectId === pid) {
-        console.log(`Owner received update: ${updateType}`);
-        qc.invalidateQueries({ queryKey: ["project", session.user._id, pid] });
-        qc.invalidateQueries({ queryKey: ["results", session.user._id, pid] });
-      }
-    });
-
     socket.data.on("lock-extended", () => {
       setLockState((prev: typeof lockState) => ({
         ...prev,
@@ -165,16 +210,17 @@ export default function Project({
     });
 
     return () => {
-      socket.data.emit("leave-project", pid);
-      socket.data.emit("release-lock", { projectId: pid });
-      socket.data.off("lock-acquired");
-      socket.data.off("lock-denied");
-      socket.data.off("project-locked");
-      socket.data.off("lock-released");
-      socket.data.off("project-updated");
-      socket.data.off("lock-extended");
+      if (socket.data) {
+        socket.data.emit("release-lock", { projectId: pid });
+        socket.data.off("lock-acquired");
+        socket.data.off("lock-denied");
+        socket.data.off("project-locked");
+        socket.data.off("lock-released");
+        socket.data.off("lock-extended");
+      }
     };
-  }, [socket.data, pid, toast, qc, session.user._id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket.data, pid]);
 
   // Auto-extend lock every 4 minutes
   useEffect(() => {
@@ -258,12 +304,7 @@ export default function Project({
       </div>
     );
 
-  if (
-    project.isLoading ||
-    !project.data ||
-    projectResults.isLoading ||
-    !projectResults.data
-  )
+  if (project.isLoading || !project.data)
     return (
       <div className="flex justify-center items-center h-screen">
         <Loading />
@@ -292,7 +333,7 @@ export default function Project({
             </h1>
             <div className="flex items-center gap-2 xl:hidden">
               <ViewToggle />
-              {lockState.hasLock && <ModeToggle />}
+              <ModeToggle />
             </div>
           </div>
           <div className="flex items-center justify-between w-full xl:w-auto gap-2">
@@ -411,7 +452,7 @@ export default function Project({
               </Button>
               <div className="hidden xl:flex items-center gap-2">
                 <ViewToggle />
-                {lockState.hasLock && <ModeToggle />}
+                <ModeToggle />
               </div>
             </div>
           </div>
@@ -436,10 +477,16 @@ export default function Project({
               <div className="size-10 rounded bg-muted/20" />
             </div>
           )}
-          <ProjectImageList
-            setCurrentImageId={setCurrentImage}
-            results={projectResults.data}
-          />
+          {mode === "results" && (projectResults.isLoading || !projectResults.data) ? (
+            <div className="flex-1 flex items-center justify-center">
+              <LoaderCircle className="size-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <ProjectImageList
+              setCurrentImageId={setCurrentImage}
+              results={projectResults.data ?? []}
+            />
+          )}
         </div>
       </div>
       <Transition

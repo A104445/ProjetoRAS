@@ -7,21 +7,18 @@ import { Button } from "@/components/ui/button";
 import { Toolbar } from "@/components/toolbar/toolbar";
 import Loading from "@/components/loading";
 import { ProjectProvider } from "@/providers/project-provider";
-import { use, useEffect, useLayoutEffect, useState } from "react";
+import { use, useEffect, useLayoutEffect, useState, useRef } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useSession } from "@/providers/session-provider";
 import { useToast } from "@/hooks/use-toast";
 import { ProjectImage } from "@/lib/projects";
-import { Progress } from "@/components/ui/progress";
-import { Card } from "@/components/ui/card";
-import { Transition } from "@headlessui/react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ModeToggle } from "@/components/project-page/mode-toggle";
-import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { api } from "@/lib/axios";
 import { useGetSocket } from "@/lib/queries/projects";
+import { useClearSharedProjectTools, useProcessSharedProject } from "@/lib/mutations/projects";
 
 // Custom hook to fetch shared project
 function useGetSharedProject(projectId: string, token: string) {
@@ -68,8 +65,6 @@ export default function SharedProject({
     const mode = searchParams.get("mode") ?? "edit";
     const router = useRouter();
     const path = usePathname();
-    const sidebar = useSidebar();
-    const isMobile = useIsMobile();
     const [currentImage, setCurrentImage] = useState<ProjectImage | null>(null);
     const [waitingForPreview, setWaitingForPreview] = useState<string>("");
     const qc = useQueryClient();
@@ -79,6 +74,10 @@ export default function SharedProject({
 
     // WebSocket connection for live updates
     const socket = useGetSocket(session.token);
+
+    // Mutations for processing (use current user's ID for permission checking)
+    const processProject = useProcessSharedProject();
+    const clearTools = useClearSharedProjectTools(pid);
 
     // Lock state for editors
     const [lockState, setLockState] = useState<{
@@ -99,44 +98,62 @@ export default function SharedProject({
         const timer = setInterval(() => setTick(t => t + 1), 1000);
         return () => clearInterval(timer);
     }, []);
+    const joinedRef = useRef(false);
+    // Debugging dependencies
+    const prevSocketData = useRef(socket.data);
+    const prevPid = useRef(pid);
+    const prevQc = useRef(qc);
+
+    // Combined effect for socket connection, room joining, and lock management
     useEffect(() => {
         if (!socket.data || !pid) return;
 
+        // Log what changed
+        if (socket.data !== prevSocketData.current) {
+            console.log("Shared Effect re-run due to: socket.data changed");
+            prevSocketData.current = socket.data;
+        }
+        if (pid !== prevPid.current) {
+            console.log("Shared Effect re-run due to: pid changed");
+            prevPid.current = pid;
+        }
+        if (qc !== prevQc.current) {
+            console.log("Shared Effect re-run due to: qc changed");
+            prevQc.current = qc;
+        }
+
         // Join the project room
+        console.log(`Joining project room: ${pid}`);
         socket.data.emit("join-project", pid);
-        console.log(`Joined project room: ${pid}`);
+        joinedRef.current = true;
 
         // Clean up existing listeners to prevent duplicates
         socket.data.off("project-updated");
+        socket.data.off("lock-status");
+        socket.data.off("lock-acquired");
+        socket.data.off("lock-queued");
+        socket.data.off("lock-denied");
+        socket.data.off("project-locked");
+        socket.data.off("lock-released");
+        socket.data.off("lock-extended");
 
         // Listen for project updates
-        const handleProjectUpdate = ({ projectId, updateType }: { projectId: string; updateType: string }) => {
+        socket.data.on("project-updated", ({ projectId, updateType }: { projectId: string; updateType: string }) => {
             console.log(`Received project update: ${projectId}, type: ${updateType}`);
             if (projectId === pid) {
-                qc.invalidateQueries({ queryKey: ["sharedProject", pid] });
-                qc.invalidateQueries({ queryKey: ["sharedProjectResults", pid] });
+                // Force immediate refetch instead of just invalidating
+                qc.refetchQueries({ queryKey: ["sharedProject", pid] });
+                qc.refetchQueries({ queryKey: ["sharedProjectResults", pid] });
                 toast({
                     title: "Project updated",
                     description: "Changes were made to this project.",
                 });
             }
-        };
+        });
 
-        socket.data.on("project-updated", handleProjectUpdate);
-
-        // Lock handling for editors
+        // Lock management for editors
         if (isEditor) {
-            console.log("Editor mode: checking lock status...");
-
-            // Clean up existing lock listeners
-            socket.data.off("lock-status");
-            socket.data.off("lock-acquired");
-            socket.data.off("lock-denied");
-            socket.data.off("project-locked");
-            socket.data.off("lock-released");
-
-            // First, request lock immediately (server will either grant or deny)
-            socket.data.emit("request-lock", { projectId: pid });
+            console.log("Editor mode: setting up lock listeners and requesting lock...");
 
             socket.data.on("lock-status", (status: { isLocked: boolean; lockedBy: string | null; hasLock: boolean; expiresAt: number | null }) => {
                 console.log("Lock status received:", status);
@@ -146,7 +163,18 @@ export default function SharedProject({
             socket.data.on("lock-acquired", () => {
                 console.log("Lock acquired!");
                 setLockState({ isLocked: true, lockedBy: null, hasLock: true, expiresAt: Date.now() + 5 * 60 * 1000 });
+                // Force refetch project data when lock is acquired to get latest changes
+                qc.refetchQueries({ queryKey: ["sharedProject", pid] });
                 toast({ title: "Edit mode active", description: "You can now make changes." });
+            });
+
+            socket.data.on("lock-queued", ({ position }: { position: number }) => {
+                console.log("Lock queued, position:", position);
+                setLockState(prev => ({ ...prev, isLocked: true, hasLock: false }));
+                toast({
+                    title: "Queued for Edit",
+                    description: `You are #${position} in line for editing.`,
+                });
             });
 
             socket.data.on("lock-denied", ({ lockedBy }: { lockedBy: string }) => {
@@ -158,49 +186,54 @@ export default function SharedProject({
                 });
             });
 
-            socket.data.on("project-locked", ({ lockedBy }: { lockedBy: string }) => {
-                setLockState((prev: typeof lockState) => {
+            socket.data.on("project-locked", ({ lockedBy, expiresAt }: { lockedBy: string, expiresAt: number | null }) => {
+                setLockState((prev) => {
                     if (!prev.hasLock) {
-                        return { isLocked: true, lockedBy, hasLock: false, expiresAt: null };
+                        return { isLocked: true, lockedBy, hasLock: false, expiresAt: expiresAt };
                     }
                     return prev;
                 });
             });
 
             socket.data.on("lock-released", () => {
-                console.log("Lock released!");
-                setLockState((prev: typeof lockState) => {
-                    if (!prev.hasLock) {
-                        // Try to acquire the released lock
-                        socket.data.emit("request-lock", { projectId: pid });
-                        return { isLocked: false, lockedBy: null, hasLock: false, expiresAt: null };
-                    }
-                    return prev;
-                });
+                console.log("Lock released event received");
+                setLockState({ isLocked: false, lockedBy: null, hasLock: false, expiresAt: null });
+                // Auto-request lock again when released
+                socket.data.emit("request-lock", { projectId: pid });
             });
 
             socket.data.on("lock-extended", () => {
-                setLockState((prev: typeof lockState) => ({
+                setLockState((prev) => ({
                     ...prev,
                     expiresAt: Date.now() + 5 * 60 * 1000
                 }));
             });
+
+            // Request lock after listeners are set up
+            socket.data.emit("request-lock", { projectId: pid });
         }
 
         return () => {
-            socket.data.emit("leave-project", pid);
-            socket.data.off("project-updated", handleProjectUpdate);
-            if (isEditor) {
-                socket.data.emit("release-lock", { projectId: pid });
-                socket.data.off("lock-status");
-                socket.data.off("lock-acquired");
-                socket.data.off("lock-denied");
-                socket.data.off("project-locked");
-                socket.data.off("lock-released");
-                socket.data.off("lock-extended");
+            if (socket.data) {
+                console.log("Shared page connection cleanup");
+                socket.data.emit("leave-project", pid);
+                socket.data.off("project-updated");
+                if (isEditor) {
+                    console.log("Releasing lock on cleanup");
+                    socket.data.emit("release-lock", { projectId: pid });
+                    socket.data.off("lock-status");
+                    socket.data.off("lock-acquired");
+                    socket.data.off("lock-queued");
+                    socket.data.off("lock-denied");
+                    socket.data.off("project-locked");
+                    socket.data.off("lock-released");
+                    socket.data.off("lock-extended");
+                }
+                joinedRef.current = false;
             }
         };
-    }, [socket.data, pid, qc, toast, isEditor]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [socket.data, pid, isEditor]);
 
     // Auto-extend lock for editors every 4 minutes
     useEffect(() => {
@@ -212,6 +245,82 @@ export default function SharedProject({
 
         return () => clearInterval(interval);
     }, [socket.data, pid, isEditor, lockState.hasLock]);
+
+    // Refetch results when switching to results mode
+    useEffect(() => {
+        if (mode === "results") {
+            projectResults.refetch();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [mode]);
+
+    // Process update handler - track updates and navigate to results when complete
+    const totalProcessingSteps = (project.data?.imgs?.length || 1) * (project.data?.tools?.length || 1);
+    const processedStepsRef = useRef(0);
+
+    useEffect(() => {
+        if (!socket.data) return;
+
+        function onProcessUpdate() {
+            processedStepsRef.current += 1;
+            console.log(`Process update received: ${processedStepsRef.current}/${totalProcessingSteps}`);
+
+            if (processedStepsRef.current >= totalProcessingSteps) {
+                console.log("Processing complete, waiting for results to be ready...");
+                processedStepsRef.current = 0;
+                toast({
+                    title: "Processing complete",
+                    description: "Loading results...",
+                });
+
+                // Poll for results until they're available
+                const pollForResults = async () => {
+                    const maxAttempts = 20; // Max 20 seconds
+                    let attempts = 0;
+
+                    const checkResults = async (): Promise<boolean> => {
+                        attempts++;
+                        const result = await projectResults.refetch();
+                        const hasResults = result.data?.imgs && result.data.imgs.length > 0;
+
+                        if (hasResults) {
+                            return true;
+                        }
+
+                        if (attempts < maxAttempts) {
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                            return checkResults();
+                        }
+
+                        return false;
+                    };
+
+                    const found = await checkResults();
+                    if (found) {
+                        const params = new URLSearchParams(searchParams.toString());
+                        params.set("mode", "results");
+                        params.set("view", "grid");
+                        router.push(`${path}?${params.toString()}`);
+                    } else {
+                        toast({
+                            title: "Results not ready",
+                            description: "Please try switching to results mode manually.",
+                            variant: "destructive",
+                        });
+                    }
+                };
+
+                pollForResults();
+            }
+        }
+
+        socket.data.on("process-update", onProcessUpdate);
+
+        return () => {
+            if (socket.data) socket.data.off("process-update", onProcessUpdate);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [socket.data, totalProcessingSteps]);
 
     useLayoutEffect(() => {
         if (
@@ -260,48 +369,92 @@ export default function SharedProject({
                                     ? "View only"
                                     : lockState.hasLock
                                         ? `Editing ${lockState.expiresAt ? Math.max(0, Math.ceil((lockState.expiresAt - Date.now()) / 1000)) + "s" : ""}`
-                                        : "View only"})
+                                        : lockState.isLocked
+                                            ? "View only"
+                                            : "Loading..."})
                             </span>
                         </h1>
                         <div className="flex items-center gap-2 xl:hidden">
                             <ViewToggle />
-                            {isEditor && lockState.hasLock && <ModeToggle />}
+                            <ModeToggle />
                         </div>
                     </div>
                     <div className="flex items-center justify-between w-full xl:w-auto gap-2">
                         <SidebarTrigger variant="outline" className="h-9 w-10 lg:hidden" />
                         <div className="flex items-center gap-2 flex-wrap justify-end xl:justify-normal w-full xl:w-auto">
-                            {/* Only show editing controls for editors */}
-                            {isEditor && mode !== "results" && (
+                            {/* Only show editing controls for editors with lock */}
+                            {isEditor && lockState.hasLock && mode !== "results" && (
                                 <>
                                     <Button
                                         disabled={
-                                            project.data.tools?.length <= 0 || waitingForPreview !== ""
+                                            project.data.tools?.length <= 0 ||
+                                            waitingForPreview !== "" ||
+                                            processProject.isPending
                                         }
                                         className="inline-flex"
                                         onClick={() => {
-                                            toast({
-                                                title: "Processing...",
-                                                description: "This feature is being implemented for shared projects.",
-                                            });
+                                            processProject.mutate(
+                                                {
+                                                    pid: project.data._id,
+                                                    userId: session.user._id,
+                                                    token: session.token,
+                                                },
+                                                {
+                                                    onSuccess: () => {
+                                                        // Reset steps counter for new processing
+                                                        processedStepsRef.current = 0;
+                                                        toast({
+                                                            title: "Processing started",
+                                                            description: "Your images are being processed.",
+                                                        });
+                                                    },
+                                                    onError: (error: Error) =>
+                                                        toast({
+                                                            title: "Error",
+                                                            description: error.message,
+                                                            variant: "destructive",
+                                                        }),
+                                                },
+                                            );
                                         }}
                                     >
-                                        <Play /> Apply
+                                        {processProject.isPending ? (
+                                            <LoaderCircle className="animate-spin" />
+                                        ) : (
+                                            <Play />
+                                        )}
+                                        Apply
                                     </Button>
                                     <Button
                                         variant="outline"
                                         disabled={
                                             project.data.tools?.length <= 0 ||
-                                            waitingForPreview !== ""
+                                            waitingForPreview !== "" ||
+                                            clearTools.isPending
                                         }
                                         onClick={() => {
-                                            toast({
-                                                title: "Reset",
-                                                description: "This feature is being implemented for shared projects.",
-                                            });
+                                            clearTools.mutate(
+                                                {
+                                                    pid: project.data._id,
+                                                    userId: session.user._id,
+                                                    token: session.token,
+                                                },
+                                                {
+                                                    onSuccess: () => {
+                                                        toast({
+                                                            title: "Project reset",
+                                                            description: "All filters have been removed.",
+                                                        });
+                                                    },
+                                                },
+                                            );
                                         }}
                                     >
-                                        <RotateCcw />
+                                        {clearTools.isPending ? (
+                                            <LoaderCircle className="animate-spin" />
+                                        ) : (
+                                            <RotateCcw />
+                                        )}
                                     </Button>
                                 </>
                             )}
@@ -320,7 +473,7 @@ export default function SharedProject({
                             </Button>
                             <div className="hidden xl:flex items-center gap-2">
                                 <ViewToggle />
-                                {isEditor && lockState.hasLock && <ModeToggle />}
+                                <ModeToggle />
                             </div>
                         </div>
                     </div>
@@ -337,10 +490,19 @@ export default function SharedProject({
                 {/* Main Content */}
                 <div className="h-full overflow-x-hidden flex">
                     {isEditor && lockState.hasLock && mode !== "results" && <Toolbar />}
-                    <ProjectImageList
-                        setCurrentImageId={setCurrentImage}
-                        results={projectResults.data ?? { imgs: [], texts: [] }}
-                    />
+                    {mode === "results" && (projectResults.isLoading || !projectResults.data) ? (
+                        <div className="flex-1 flex flex-col items-center justify-center gap-2">
+                            <Loading />
+                            <span className="text-sm text-muted-foreground">
+                                {isViewer ? "View only" : isEditor ? "Editor" : ""}
+                            </span>
+                        </div>
+                    ) : (
+                        <ProjectImageList
+                            setCurrentImageId={setCurrentImage}
+                            results={projectResults.data ?? { imgs: [], texts: [] }}
+                        />
+                    )}
                 </div>
             </div>
         </ProjectProvider>

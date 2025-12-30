@@ -135,6 +135,24 @@ router.delete("/shared/:projectId/tools", auth.checkAuth, function (req, res, ne
     });
 });
 
+/**
+ * Process a shared project (editors only)
+ */
+router.post("/shared/:projectId/process", auth.checkAuth, function (req, res, next) {
+  axios
+    .post(projectsURL + `shared/${req.params.projectId}/process`, req.body, {
+      params: { userId: req.userId },
+      httpsAgent: httpsAgent,
+    })
+    .then((resp) => res.status(201).jsonp(resp.data))
+    .catch((err) => {
+      console.error("Error processing shared project:", err.response?.data || err.message);
+      const status = err.response?.status || 500;
+      const message = err.response?.data?.error || "Error processing project";
+      res.status(status).jsonp({ error: message });
+    });
+});
+
 // --- Share Routes (Nested under /projects) ---
 
 /**

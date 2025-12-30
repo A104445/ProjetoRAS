@@ -37,12 +37,13 @@ function send_msg_tool(msg_id, timestamp, og_img_uri, new_img_uri, tool, params)
     send_rabbit_msg(msg, queue);
 }
 
-function send_msg_client(msg_id, timestamp, user) {
+function send_msg_client(msg_id, timestamp, user, projectId) {
     const queue = queues['ws'];
     const msg = {
         "messageId": msg_id,
         "timestamp": timestamp,
         "user": user,
+        "projectId": projectId,
         "status": 'success'
     };
 
@@ -63,20 +64,21 @@ function send_msg_client_error(msg_id, timestamp, user, error_code, error_msg) {
     send_rabbit_msg(msg, queue);
 }
 
-function send_msg_client_preview(msg_id, timestamp, user, url) {
+function send_msg_client_preview(msg_id, timestamp, user, url, projectId) {
     const queue = queues['ws'];
     const msg = {
         "messageId": msg_id,
         "timestamp": timestamp,
         "status": 'success',
         "user": user,
-        "img_url": url
+        "img_url": url,
+        "projectId": projectId
     };
 
     send_rabbit_msg(msg, queue);
 }
 
-function send_msg_client_preview_error(msg_id, timestamp, user, error_code, error_msg) {
+function send_msg_client_preview_error(msg_id, timestamp, user, error_code, error_msg, projectId) {
     const queue = queues['ws'];
     const msg = {
         "messageId": msg_id,
@@ -84,7 +86,8 @@ function send_msg_client_preview_error(msg_id, timestamp, user, error_code, erro
         "user": user,
         "status": "error",
         "errorCode": error_code,
-        "errorMsg": error_msg
+        "errorMsg": error_msg,
+        "projectId": projectId
     };
 
     send_rabbit_msg(msg, queue);

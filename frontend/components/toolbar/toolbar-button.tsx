@@ -1,6 +1,6 @@
 import { LoaderCircle, Sparkle, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useSession } from "@/providers/session-provider";
 import {
   DropdownMenu,
@@ -20,6 +20,9 @@ import {
   useDeleteProjectTool,
   usePreviewProjectResult,
   useUpdateProjectTool,
+  useAddSharedProjectTool,
+  useUpdateSharedProjectTool,
+  useDeleteSharedProjectTool,
 } from "@/lib/mutations/projects";
 import { ProjectTool, ProjectToolResponse } from "@/lib/projects";
 import { toast } from "@/hooks/use-toast";
@@ -42,7 +45,7 @@ interface ToolbarButtonProps {
 
 export function ToolbarButton({
   open = false,
-  setOpen = () => {},
+  setOpen = () => { },
   icon: Icon,
   label,
   disabled = false,
@@ -51,34 +54,46 @@ export function ToolbarButton({
   tool,
   children,
   noParams = false,
-  onDefault = () => {},
+  onDefault = () => { },
 }: ToolbarButtonProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const session = useSession();
   const project = useProjectInfo();
   const preview = usePreview();
   const variant =
-    project.tools.find((t) => t.procedure === tool.procedure) !== undefined
+    project.tools.find((t: ProjectToolResponse) => t.procedure === tool.procedure) !== undefined
       ? "default"
       : "outline";
   const socket = useGetSocket(session.token);
 
+  // Detect if we're on a shared project page
+  const isSharedProject = pathname.includes("/shared/");
+
   const currentImage = useCurrentImage();
-  const addTool = useAddProjectTool(
-    session.user._id,
+
+  // Owner-based mutations (for regular projects)
+  const addToolOwner = useAddProjectTool(
+    project.user_id || "",
     project._id,
     session.token,
   );
-  const updateTool = useUpdateProjectTool(
-    session.user._id,
+  const updateToolOwner = useUpdateProjectTool(
+    project.user_id || "",
     project._id,
     session.token,
   );
-  const deleteTool = useDeleteProjectTool(
-    session.user._id,
+  const deleteToolOwner = useDeleteProjectTool(
+    project.user_id || "",
     project._id,
     session.token,
   );
+
+  // Shared project mutations
+  const addToolShared = useAddSharedProjectTool(project._id);
+  const updateToolShared = useUpdateSharedProjectTool(project._id);
+  const deleteToolShared = useDeleteSharedProjectTool(project._id);
+
   const previewEdits = usePreviewProjectResult();
 
   const [prevTool, setPrevTool] = useState<ProjectToolResponse | undefined>(
@@ -89,30 +104,58 @@ export function ToolbarButton({
 
   function handleDeleteTool() {
     if (prevTool) {
-      deleteTool.mutate(
-        {
-          uid: session.user._id,
-          pid: project._id,
-          toolId: prevTool._id,
-          token: session.token,
-        },
-        {
-          onError: (error) => {
-            toast({
-              title: "Ups! An error occurred.",
-              description: error.message,
-              variant: "destructive",
-            });
+      if (isSharedProject) {
+        deleteToolShared.mutate(
+          {
+            pid: project._id,
+            userId: session.user._id,
+            toolId: prevTool._id,
+            token: session.token,
           },
-        },
-      );
+          {
+            onError: (error: Error) => {
+              toast({
+                title: "Ups! An error occurred.",
+                description: error.message,
+                variant: "destructive",
+              });
+            },
+          },
+        );
+      } else {
+        deleteToolOwner.mutate(
+          {
+            uid: project.user_id,
+            pid: project._id,
+            toolId: prevTool._id,
+            token: session.token,
+          },
+          {
+            onError: (error: Error) => {
+              toast({
+                title: "Ups! An error occurred.",
+                description: error.message,
+                variant: "destructive",
+              });
+            },
+          },
+        );
+      }
     }
   }
 
   function handlePreview() {
+    // Preview still uses owner endpoint - for shared projects, use owner ID or skip
+    if (isSharedProject) {
+      toast({
+        title: "Preview",
+        description: "Preview is not available for shared projects.",
+      });
+      return;
+    }
     previewEdits.mutate(
       {
-        uid: session.user._id,
+        uid: project.user_id,
         pid: project._id,
         imageId: currentImage?._id ?? "",
         token: session.token,
@@ -126,7 +169,7 @@ export function ToolbarButton({
             10000 * (project.tools.length + 1),
           );
         },
-        onError: (error) => {
+        onError: (error: Error) => {
           toast({
             title: "Ups! An error occurred.",
             description: error.message,
@@ -137,53 +180,103 @@ export function ToolbarButton({
     );
   }
 
-  function handleAddTool(preview?: boolean) {
+  function handleAddTool(doPreview?: boolean) {
     if (prevTool) {
-      updateTool.mutate(
-        {
-          uid: session.user._id,
-          pid: project._id,
-          toolId: prevTool._id,
-          toolParams: tool.params,
-          token: session.token,
-        },
-        {
-          onSuccess: () => {
-            if (preview) handlePreview();
+      if (isSharedProject) {
+        updateToolShared.mutate(
+          {
+            pid: project._id,
+            userId: session.user._id,
+            toolId: prevTool._id,
+            toolParams: tool.params,
+            token: session.token,
           },
-          onError: (error) => {
-            toast({
-              title: "Ups! An error occurred.",
-              description: error.message,
-              variant: "destructive",
-            });
+          {
+            onSuccess: () => {
+              if (doPreview) handlePreview();
+            },
+            onError: (error: Error) => {
+              toast({
+                title: "Ups! An error occurred.",
+                description: error.message,
+                variant: "destructive",
+              });
+            },
           },
-        },
-      );
+        );
+      } else {
+        updateToolOwner.mutate(
+          {
+            uid: project.user_id,
+            pid: project._id,
+            toolId: prevTool._id,
+            toolParams: tool.params,
+            token: session.token,
+          },
+          {
+            onSuccess: () => {
+              if (doPreview) handlePreview();
+            },
+            onError: (error: Error) => {
+              toast({
+                title: "Ups! An error occurred.",
+                description: error.message,
+                variant: "destructive",
+              });
+            },
+          },
+        );
+      }
     } else {
-      addTool.mutate(
-        {
-          uid: session.user._id,
-          pid: project._id,
-          tool: {
-            ...tool,
-            position: project.tools.length,
+      if (isSharedProject) {
+        addToolShared.mutate(
+          {
+            pid: project._id,
+            userId: session.user._id,
+            tool: {
+              ...tool,
+              position: project.tools.length,
+            },
+            token: session.token,
           },
-          token: session.token,
-        },
-        {
-          onSuccess: () => {
-            if (preview) handlePreview();
+          {
+            onSuccess: () => {
+              if (doPreview) handlePreview();
+            },
+            onError: (error: Error) => {
+              toast({
+                title: "Ups! An error occurred.",
+                description: error.message,
+                variant: "destructive",
+              });
+            },
           },
-          onError: (error) => {
-            toast({
-              title: "Ups! An error occurred.",
-              description: error.message,
-              variant: "destructive",
-            });
+        );
+      } else {
+        addToolOwner.mutate(
+          {
+            uid: project.user_id,
+            pid: project._id,
+            tool: {
+              ...tool,
+              position: project.tools.length,
+            },
+            token: session.token,
           },
-        },
-      );
+          {
+            onSuccess: () => {
+              if (doPreview) handlePreview();
+            },
+            onError: (error: Error) => {
+              toast({
+                title: "Ups! An error occurred.",
+                description: error.message,
+                variant: "destructive",
+              });
+            },
+          },
+        );
+      }
     }
     setOpen(false);
   }

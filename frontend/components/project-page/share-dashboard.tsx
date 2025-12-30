@@ -48,7 +48,7 @@ export function ShareDashboard({
                 </Button>
             </DialogTrigger>
 
-            <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogContent className="sm:max-w-4xl min-h-[400px]">
                 <DialogHeader>
                     <DialogTitle>Manage Shares for "{projectName}"</DialogTitle>
                     <DialogDescription>

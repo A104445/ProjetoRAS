@@ -182,7 +182,8 @@ function process_msg() {
             `update-client-preview-${uuidv4()}`,
             timestamp,
             process.user_id,
-            JSON.stringify(urls)
+            JSON.stringify(urls),
+            process.project_id
           );
 
         }
@@ -194,7 +195,8 @@ function process_msg() {
         send_msg_client(
           user_msg_id,
           timestamp,
-          process.user_id
+          process.user_id,
+          process.project_id
         );
 
       if (!/preview/.test(msg_id) && (type == "text" || next_pos >= project.tools.length)) {
@@ -411,6 +413,7 @@ router.get("/shared/:projectId", async (req, res, next) => {
 
     const response = {
       _id: project._id,
+      user_id: ownerId,
       name: project.name,
       tools: project.tools,
       imgs: [],
@@ -527,7 +530,7 @@ router.post("/shared/:projectId/tool", async (req, res) => {
 
     // Check editor permission
     const permCheck = await Project.checkPermission(projectId, userId);
-    if (!permCheck.hasAccess || permCheck.role !== 'edit') {
+    if (!permCheck.hasAccess || (permCheck.role !== 'edit' && permCheck.role !== 'owner')) {
       return res.status(403).json({ error: "Edit access required" });
     }
 
@@ -578,7 +581,7 @@ router.put("/shared/:projectId/tool/:toolId", async (req, res) => {
     }
 
     const permCheck = await Project.checkPermission(projectId, userId);
-    if (!permCheck.hasAccess || permCheck.role !== 'edit') {
+    if (!permCheck.hasAccess || (permCheck.role !== 'edit' && permCheck.role !== 'owner')) {
       return res.status(403).json({ error: "Edit access required" });
     }
 
@@ -621,7 +624,7 @@ router.delete("/shared/:projectId/tool/:toolId", async (req, res) => {
     }
 
     const permCheck = await Project.checkPermission(projectId, userId);
-    if (!permCheck.hasAccess || permCheck.role !== 'edit') {
+    if (!permCheck.hasAccess || (permCheck.role !== 'edit' && permCheck.role !== 'owner')) {
       return res.status(403).json({ error: "Edit access required" });
     }
 
@@ -672,7 +675,7 @@ router.delete("/shared/:projectId/tools", async (req, res) => {
     }
 
     const permCheck = await Project.checkPermission(projectId, userId);
-    if (!permCheck.hasAccess || permCheck.role !== 'edit') {
+    if (!permCheck.hasAccess || (permCheck.role !== 'edit' && permCheck.role !== 'owner')) {
       return res.status(403).json({ error: "Edit access required" });
     }
 
@@ -692,6 +695,120 @@ router.delete("/shared/:projectId/tools", async (req, res) => {
   } catch (error) {
     console.error("Error clearing tools from shared project:", error);
     res.status(500).json({ error: "Error clearing tools" });
+  }
+});
+
+/**
+ * Process a shared project (editors only)
+ */
+router.post("/shared/:projectId/process", async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId query parameter is required" });
+    }
+
+    const permCheck = await Project.checkPermission(projectId, userId);
+    if (!permCheck.hasAccess || (permCheck.role !== 'edit' && permCheck.role !== 'owner')) {
+      return res.status(403).json({ error: "Edit access required" });
+    }
+
+    const project = await Project.getById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const ownerId = project.user_id.toString();
+
+    if (project.tools.length === 0) {
+      return res.status(400).json({ error: "No tools selected" });
+    }
+
+    // Delete previous results
+    try {
+      const prev_results = await Result.getAll(ownerId, projectId);
+      for (let r of prev_results) {
+        await delete_image(ownerId, projectId, "out", r.img_key);
+        await Result.delete(r.user_id, r.project_id, r.img_id);
+      }
+    } catch (err) {
+      console.error("Error deleting previous results:", err);
+    }
+
+    const adv_tools = advanced_tool_num(project);
+
+    // Check if owner can process (use owner ID for quota)
+    const canProcessResp = await axios.get(users_ms + `${ownerId}/process/${adv_tools}`, {
+      httpsAgent: httpsAgent,
+    });
+
+    if (!canProcessResp.data) {
+      return res.status(404).json({ error: "No more daily_operations available" });
+    }
+
+    const source_path = `/../images/users/${ownerId}/projects/${projectId}/src`;
+    const result_path = `/../images/users/${ownerId}/projects/${projectId}/out`;
+
+    if (fs.existsSync(path.join(__dirname, source_path)))
+      fs.rmSync(path.join(__dirname, source_path), { recursive: true, force: true });
+    fs.mkdirSync(path.join(__dirname, source_path), { recursive: true });
+
+    if (fs.existsSync(path.join(__dirname, result_path)))
+      fs.rmSync(path.join(__dirname, result_path), { recursive: true, force: true });
+    fs.mkdirSync(path.join(__dirname, result_path), { recursive: true });
+
+    let error = false;
+
+    for (let img of project.imgs) {
+      try {
+        const resp = await get_image_docker(ownerId, projectId, "src", img.og_img_key);
+        const url = resp.data.url;
+        const img_resp = await axios.get(url, { responseType: "stream" });
+        const writer = fs.createWriteStream(img.og_uri);
+
+        await new Promise((resolve, reject) => {
+          writer.on("finish", resolve);
+          writer.on("error", reject);
+          img_resp.data.pipe(writer);
+        });
+
+        const msg_id = `request-${uuidv4()}`;
+        const timestamp = new Date().toISOString();
+        const og_img_uri = img.og_uri;
+        const new_img_uri = img.new_uri;
+        const tool = project.tools.filter((t) => t.position === 0)[0];
+        const tool_name = tool.procedure;
+        const params = tool.params;
+
+        const process = {
+          user_id: ownerId,
+          project_id: projectId,
+          img_id: img._id,
+          msg_id: msg_id,
+          cur_pos: 0,
+          og_img_uri: og_img_uri,
+          new_img_uri: new_img_uri,
+        };
+
+        await Process.create(process);
+        send_msg_tool(msg_id, timestamp, og_img_uri, new_img_uri, tool_name, params);
+      } catch (err) {
+        console.error("Error processing image:", err);
+        error = true;
+      }
+    }
+
+    if (error) {
+      res.status(603).json({ error: "Some process requests failed" });
+    } else {
+      send_project_update(projectId, 'processing-started', { userId });
+      res.sendStatus(201);
+    }
+  } catch (error) {
+    console.error("Error processing shared project:", error);
+    res.status(500).json({ error: "Error processing project" });
   }
 });
 
@@ -724,6 +841,7 @@ router.get("/:user/:project", (req, res, next) => {
 
       const response = {
         _id: project._id,
+        user_id: project.user_id,
         name: project.name,
         tools: project.tools,
         imgs: [],

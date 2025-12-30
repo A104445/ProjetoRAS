@@ -563,3 +563,127 @@ export const processProject = async ({
   if (response.status !== 201 || !response.data)
     throw new Error("Failed to request project processing");
 };
+
+// ============ SHARED PROJECT FUNCTIONS ============
+
+export const addSharedProjectTool = async ({
+  pid,
+  userId,
+  tool,
+  token,
+}: {
+  pid: string;
+  userId: string;
+  tool: ProjectTool;
+  token: string;
+}) => {
+  const response = await api.post(
+    `/projects/shared/${pid}/tool?userId=${userId}`,
+    {
+      ...tool,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (response.status !== 201) throw new Error("Failed to add tool");
+};
+
+export const updateSharedProjectTool = async ({
+  pid,
+  userId,
+  toolId,
+  toolParams,
+  token,
+}: {
+  pid: string;
+  userId: string;
+  toolId: string;
+  toolParams: ToolParams;
+  token: string;
+}) => {
+  const response = await api.put(
+    `/projects/shared/${pid}/tool/${toolId}?userId=${userId}`,
+    {
+      params: toolParams,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (response.status !== 204) throw new Error("Failed to update tool");
+};
+
+export const deleteSharedProjectTool = async ({
+  pid,
+  userId,
+  toolId,
+  token,
+}: {
+  pid: string;
+  userId: string;
+  toolId: string;
+  token: string;
+}) => {
+  const response = await api.delete(
+    `/projects/shared/${pid}/tool/${toolId}?userId=${userId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (response.status !== 204) throw new Error("Failed to remove tool");
+};
+
+export const clearSharedProjectTools = async ({
+  pid,
+  userId,
+  token,
+}: {
+  pid: string;
+  userId: string;
+  token: string;
+}) => {
+  const response = await api.delete(
+    `/projects/shared/${pid}/tools?userId=${userId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (response.status !== 204) throw new Error("Failed to clear tools");
+};
+
+export const processSharedProject = async ({
+  pid,
+  userId,
+  token,
+}: {
+  pid: string;
+  userId: string;
+  token: string;
+}) => {
+  const response = await api.post<string>(
+    `/projects/shared/${pid}/process?userId=${userId}`,
+    {},
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (response.status !== 201 || !response.data)
+    throw new Error("Failed to process shared project");
+};
+
