@@ -1,5 +1,5 @@
 # PictuRAS
-
+alterado
 **Your personal, intuitive and powerful image editor.**
 
 PictuRAS is a comprehensive web-based image editing platform that combines traditional image processing tools with cutting-edge AI capabilities. Built as a microservices architecture, it provides users with an intuitive interface for editing images, applying effects, and leveraging AI-powered features for smart enhancements.
