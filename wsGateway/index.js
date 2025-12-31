@@ -39,10 +39,10 @@ function acquireLock(projectId, userId) {
     // Refresh if already held by same user
     if (existing && existing.userId === userId) {
         if (existing.timeoutId) clearTimeout(existing.timeoutId);
-        existing.expiresAt = Date.now() + 5 * 60 * 1000;
+        existing.expiresAt = Date.now() + 60 * 1000;
         existing.timeoutId = setTimeout(() => {
             handleLockExpiration(projectId);
-        }, 5 * 60 * 1000);
+        }, 60 * 1000);
         return { acquired: true, expiresAt: existing.expiresAt };
     }
 
@@ -51,10 +51,10 @@ function acquireLock(projectId, userId) {
         clearTimeout(existing.timeoutId);
     }
 
-    const expiresAt = Date.now() + 5 * 60 * 1000;
+    const expiresAt = Date.now() + 60 * 1000;
     const timeoutId = setTimeout(() => {
         handleLockExpiration(projectId);
-    }, 5 * 60 * 1000);
+    }, 60 * 1000);
 
     projectLocks.set(projectId, { userId, expiresAt, timeoutId });
     console.log(`Lock acquired by ${userId} for project: ${projectId}`);
@@ -136,10 +136,10 @@ function extendLock(projectId, userId) {
     const existing = projectLocks.get(projectId);
     if (existing && existing.userId === userId) {
         clearTimeout(existing.timeoutId);
-        existing.expiresAt = Date.now() + 5 * 60 * 1000;
+        existing.expiresAt = Date.now() + 60 * 1000;
         existing.timeoutId = setTimeout(() => {
             handleLockExpiration(projectId);
-        }, 5 * 60 * 1000);
+        }, 60 * 1000);
         return true;
     }
     return false;

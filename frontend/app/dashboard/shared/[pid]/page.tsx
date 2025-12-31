@@ -69,8 +69,19 @@ export default function SharedProject({
     const [waitingForPreview, setWaitingForPreview] = useState<string>("");
     const qc = useQueryClient();
 
-    const isViewer = permission === "view";
-    const isEditor = permission === "edit";
+    // Use server-verified permission from project data, not URL parameter
+    // This prevents users from changing URL to gain edit access
+    const urlPermission = searchParams.get("permission") ?? "view";
+    const serverRole = project.data?._accessRole;
+
+    // If server says 'view' but URL says 'edit', treat as viewer (security)
+    // If server says 'edit' or 'owner', allow edit access
+    const verifiedPermission = serverRole === 'edit' || serverRole === 'owner'
+        ? urlPermission
+        : 'view'; // Force view-only if server doesn't grant edit access
+
+    const isViewer = verifiedPermission === "view" || serverRole === "view";
+    const isEditor = verifiedPermission === "edit" && (serverRole === "edit" || serverRole === "owner");
 
     // WebSocket connection for live updates
     const socket = useGetSocket(session.token);
@@ -162,7 +173,7 @@ export default function SharedProject({
 
             socket.data.on("lock-acquired", () => {
                 console.log("Lock acquired!");
-                setLockState({ isLocked: true, lockedBy: null, hasLock: true, expiresAt: Date.now() + 5 * 60 * 1000 });
+                setLockState({ isLocked: true, lockedBy: null, hasLock: true, expiresAt: Date.now() + 60 * 1000 });
                 // Force refetch project data when lock is acquired to get latest changes
                 qc.refetchQueries({ queryKey: ["sharedProject", pid] });
                 toast({ title: "Edit mode active", description: "You can now make changes." });
@@ -205,7 +216,7 @@ export default function SharedProject({
             socket.data.on("lock-extended", () => {
                 setLockState((prev) => ({
                     ...prev,
-                    expiresAt: Date.now() + 5 * 60 * 1000
+                    expiresAt: Date.now() + 60 * 1000
                 }));
             });
 
@@ -235,16 +246,6 @@ export default function SharedProject({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [socket.data, pid, isEditor]);
 
-    // Auto-extend lock for editors every 4 minutes
-    useEffect(() => {
-        if (!socket.data || !isEditor || !lockState.hasLock) return;
-
-        const interval = setInterval(() => {
-            socket.data.emit("extend-lock", { projectId: pid });
-        }, 4 * 60 * 1000);
-
-        return () => clearInterval(interval);
-    }, [socket.data, pid, isEditor, lockState.hasLock]);
 
     // Refetch results when switching to results mode
     useEffect(() => {
@@ -480,7 +481,7 @@ export default function SharedProject({
                 </div>
                 {/* Lock status banner for editors */}
                 {isEditor && lockState.isLocked && !lockState.hasLock && (
-                    <div className="bg-yellow-500/20 text-yellow-300 px-4 py-2 text-sm flex items-center gap-2">
+                    <div className="bg-blue-500/20 text-blue-300 px-4 py-2 text-sm flex items-center gap-2">
                         <LoaderCircle className="size-4 animate-spin" />
                         {lockState.lockedBy
                             ? `Locked by user ${lockState.lockedBy.substring(0, 8)}... View-only mode. (${lockState.expiresAt ? Math.max(0, Math.ceil((lockState.expiresAt - Date.now()) / 1000)) + "s left" : "No time"})`

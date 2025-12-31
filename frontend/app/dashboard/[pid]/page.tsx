@@ -170,7 +170,7 @@ export default function Project({
 
     socket.data.on("lock-acquired", () => {
       console.log("Lock acquired!");
-      setLockState((prev: typeof lockState) => ({ ...prev, isLocked: true, lockedBy: session.user._id, hasLock: true, expiresAt: Date.now() + 5 * 60 * 1000 }));
+      setLockState((prev: typeof lockState) => ({ ...prev, isLocked: true, lockedBy: session.user._id, hasLock: true, expiresAt: Date.now() + 60 * 1000 }));
     });
 
     socket.data.on("lock-denied", ({ lockedBy }: { lockedBy: string }) => {
@@ -205,7 +205,7 @@ export default function Project({
     socket.data.on("lock-extended", () => {
       setLockState((prev: typeof lockState) => ({
         ...prev,
-        expiresAt: Date.now() + 5 * 60 * 1000
+        expiresAt: Date.now() + 60 * 1000
       }));
     });
 
@@ -222,16 +222,25 @@ export default function Project({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket.data, pid]);
 
-  // Auto-extend lock every 4 minutes
+  // Effect to handle lock expiration timer on the client side
   useEffect(() => {
-    if (!socket.data || !lockState.hasLock) return;
+    if (!lockState.hasLock || !lockState.expiresAt) return;
 
-    const interval = setInterval(() => {
-      socket.data.emit("extend-lock", { projectId: pid });
-    }, 4 * 60 * 1000);
+    const checkExpiration = () => {
+      const now = Date.now();
+      if (lockState.expiresAt && now >= lockState.expiresAt) {
+        // Lock has expired on client side, transition to view-only
+        console.log("Lock expired on client side, transitioning to view-only");
+        setLockState({ isLocked: false, lockedBy: null, hasLock: false, expiresAt: null });
+      }
+    };
+
+    // Check every second
+    const interval = setInterval(checkExpiration, 1000);
 
     return () => clearInterval(interval);
-  }, [socket.data, pid, lockState.hasLock]);
+  }, [lockState.hasLock, lockState.expiresAt]);
+
 
   // Helper function to broadcast project updates to shared viewers
   const broadcastProjectUpdate = (updateType: string) => {
@@ -339,7 +348,7 @@ export default function Project({
           <div className="flex items-center justify-between w-full xl:w-auto gap-2">
             <SidebarTrigger variant="outline" className="h-9 w-10 lg:hidden" />
             <div className="flex items-center gap-2 flex-wrap justify-end xl:justify-normal w-full xl:w-auto">
-              {mode !== "results" && (
+              {mode !== "results" && lockState.hasLock && (
                 <>
                   <Button
                     disabled={
@@ -459,10 +468,10 @@ export default function Project({
         </div>
         {/* Lock status banner */}
         {lockState.isLocked && !lockState.hasLock && (
-          <div className="bg-yellow-500/20 text-yellow-300 px-4 py-2 text-sm flex items-center gap-2">
+          <div className="bg-blue-500/20 text-blue-300 px-4 py-2 text-sm flex items-center gap-2">
             <LoaderCircle className="size-4 animate-spin" />
             {lockState.lockedBy
-              ? `Locked by user ${lockState.lockedBy.substring(0, 8)}... View-only mode. (${lockState.expiresAt ? Math.max(0, Math.ceil((lockState.expiresAt - Date.now()) / 1000)) + "s left" : "No time"})`
+              ? `Locked by user ${lockState.lockedBy.substring(0, 8)}... View-only mode. ${lockState.expiresAt ? Math.max(0, Math.ceil((lockState.expiresAt - Date.now()) / 1000)) + "s left" : ""}`
               : "Another user is editing. View-only mode."}
           </div>
         )}
