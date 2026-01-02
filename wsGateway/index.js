@@ -7,11 +7,7 @@ const httpServer = http.createServer();
 httpServer.listen(4000);
 
 const io = socketIo(httpServer, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"],
-    },
-    // options
+    // Removido CORS do wsGateway, controle feito pelo nginx
 });
 
 io.on("connection", (socket) => {

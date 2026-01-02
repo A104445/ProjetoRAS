@@ -550,6 +550,7 @@ services:
 
   frontend:
     build: ./frontend
+    container_name: frontend
     networks:
       - elk
     ports:

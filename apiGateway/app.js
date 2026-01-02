@@ -32,8 +32,7 @@ app.get("/health", (req, res) => {
 // Routes
 app.use("/projects", projectsRouter);
 app.use("/users", usersRouter);
-app.use("/subscriptions", subscriptionsRouter);
-app.use("/shares", sharesRouter);
+// Removido CORS do backend, controle feito pelo nginx
 
 // Catch 404 and forward to error handler
 app.use(function (req, res, next) {
@@ -69,7 +68,6 @@ app.use(function (err, req, res, next) {
     message: err.message || getDefaultMessage(statusCode),
     ...(statusCode === 404 && {
       path: req.originalUrl,
-      method: req.method
     }),
     ...(process.env.NODE_ENV !== "production" && statusCode >= 500 && {
       stack: err.stack
@@ -79,8 +77,7 @@ app.use(function (err, req, res, next) {
   // Send JSON response
   res.status(statusCode).json(errorResponse);
 });
-
-// Helper function for default error messages
+    // Removido CORS do backend, controle feito pelo nginx
 function getDefaultMessage(statusCode) {
   const messages = {
     400: "Bad Request",
