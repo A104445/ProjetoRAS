@@ -15,6 +15,7 @@ import {
   updateProjectTool,
   previewProjectImage,
   reorderProjectTools,
+  cancelProjectProcessing,
 } from "../projects";
 import { createBlobUrlFromFile, downloadBlob } from "../utils";
 
@@ -248,6 +249,42 @@ export const useReorderProjectTools = (
         refetchType: "all",
         queryKey: ["projectResults", uid, pid, token],
       });
+    },
+  });
+};
+
+export const useCancelProjectProcess = (uid: string, pid: string, token: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => cancelProjectProcessing({ uid, pid, token }),
+    onSuccess: () => {
+      // T-01: Limpar as caches para restaurar o estado original
+      qc.invalidateQueries({ queryKey: ["project", uid, pid, token] });
+      qc.invalidateQueries({ queryKey: ["projectResults", uid, pid, token] });
+    },
+  });
+};
+
+export const useReorderAndProcess = (uid: string, pid: string, token: string) => {
+  const qc = useQueryClient();
+  
+  // Hook para processar (já existente ou criado aqui)
+  const processMutation = useMutation({
+    mutationFn: () => processProject({ uid, pid, token }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["projectResults", uid, pid, token] });
+    }
+  });
+
+  return useMutation({
+    mutationFn: (newTools: any[]) => reorderProjectTools({ uid, pid, tools: newTools, token }),
+    onSuccess: () => {
+      // REQUISITO T-06: Atualização imediata do resultado
+      // Após reordenar na BD, disparar o processamento automaticamente
+      processMutation.mutate();
+      
+      // Atualizar a informação do projeto na UI
+      qc.invalidateQueries({ queryKey: ["project", uid, pid, token] });
     },
   });
 };

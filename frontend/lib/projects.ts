@@ -563,3 +563,28 @@ export const processProject = async ({
   if (response.status !== 201 || !response.data)
     throw new Error("Failed to request project processing");
 };
+
+// export async function cancelProjectProcessing({ uid, pid, token }: { uid: string, pid: string, token: string }) {
+//   const response = await axios.delete(`${process.env.NEXT_PUBLIC_API_URL}/projects/${uid}/${pid}/process/cancel`, {
+//     headers: { Authorization: `Bearer ${token}` }
+//   });
+//   return response.data;
+// }
+
+export const cancelProjectProcessing = async ({
+  uid,
+  pid,
+  token,
+}: {
+  uid: string;
+  pid: string;
+  token: string;
+}) => {
+  const response = await api.delete(`/projects/${uid}/${pid}/process/cancel`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (response.status !== 204) throw new Error("Failed to cancel processing");
+};

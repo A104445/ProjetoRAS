@@ -471,4 +471,21 @@ router.delete(
   }
 );
 
+/**
+ * Cancel project processing
+ */
+router.delete(
+  "/:user/:project/process/cancel",
+  auth.checkToken,
+  function (req, res, next) {
+    axios
+      .delete(
+        projectsURL + `${req.params.user}/${req.params.project}/process/cancel`,
+        { httpsAgent: httpsAgent }
+      )
+      .then((_) => res.sendStatus(204))
+      .catch((err) => res.status(500).jsonp("Error canceling project processing"));
+  }
+);
+
 module.exports = router;

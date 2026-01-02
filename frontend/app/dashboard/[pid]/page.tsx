@@ -21,6 +21,7 @@ import {
   useDownloadProject,
   useDownloadProjectResults,
   useProcessProject,
+  useCancelProjectProcess, // Importado para T-01
 } from "@/lib/mutations/projects";
 import { useToast } from "@/hooks/use-toast";
 import { ProjectImage } from "@/lib/projects";
@@ -32,6 +33,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ModeToggle } from "@/components/project-page/mode-toggle";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { CancelProcessButton } from "@/components/project-page/cancel-process-button"; // Importado para T-10
 
 export default function Project({
   params,
@@ -46,6 +48,8 @@ export default function Project({
   const processProject = useProcessProject();
   const downloadProjectResults = useDownloadProjectResults();
   const clearTools = useClearProjectTools(session.user._id, pid, session.token);
+  const cancelProcess = useCancelProjectProcess(session.user._id, pid, session.token); // Hook de cancelamento
+  
   const { toast } = useToast();
   const socket = useGetSocket(session.token);
   const searchParams = useSearchParams();
@@ -69,6 +73,29 @@ export default function Project({
     session.token,
   );
   const qc = useQueryClient();
+
+  // Função para lidar com o cancelamento (T-01)
+  const handleCancel = () => {
+    cancelProcess.mutate(undefined, {
+      onSuccess: () => {
+        setProcessing(false);
+        setProcessingProgress(0);
+        setProcessingSteps(1);
+        if (!isMobile) sidebar.setOpen(true);
+        toast({
+          title: "Processamento cancelado",
+          description: "A operação foi interrompida e o projeto desbloqueado.",
+        });
+      },
+      onError: (error: any) => {
+        toast({
+          title: "Erro ao cancelar",
+          description: error.message,
+          variant: "destructive",
+        });
+      }
+    });
+  };
 
   useLayoutEffect(() => {
     if (
@@ -179,7 +206,7 @@ export default function Project({
                 <>
                   <Button
                     disabled={
-                      project.data.tools.length <= 0 || waitingForPreview !== ""
+                      project.data.tools.length <= 0 || waitingForPreview !== "" || processing
                     }
                     className="inline-flex"
                     onClick={() => {
@@ -196,7 +223,7 @@ export default function Project({
                           },
                           onError: (error) =>
                             toast({
-                              title: "Ups! An error occurred.",
+                              title: "Ups! Ocorreu um erro.",
                               description: error.message,
                               variant: "destructive",
                             }),
@@ -204,14 +231,15 @@ export default function Project({
                       );
                     }}
                   >
-                    <Play /> Apply
+                    <Play /> Aplicar
                   </Button>
                   <Button
                     variant="outline"
                     disabled={
                       project.data.tools.length <= 0 ||
                       clearTools.isPending ||
-                      waitingForPreview !== ""
+                      waitingForPreview !== "" ||
+                      processing
                     }
                     onClick={() => {
                       clearTools.mutate(
@@ -224,8 +252,8 @@ export default function Project({
                         {
                           onSuccess: () =>
                             toast({
-                              title: "Project reset",
-                              description: "All filters have been removed.",
+                              title: "Projeto resetado",
+                              description: "Todos os filtros foram removidos.",
                             }),
                         },
                       );
@@ -243,7 +271,8 @@ export default function Project({
               <Button
                 variant="outline"
                 className="px-3"
-                title="Download project"
+                title="Download projeto"
+                disabled={processing}
                 onClick={() => {
                   (mode === "edit"
                     ? downloadProjectImages
@@ -258,7 +287,7 @@ export default function Project({
                     {
                       onSuccess: () => {
                         toast({
-                          title: `Project ${project.data.name} downloaded.`,
+                          title: `Projeto ${project.data.name} descarregado.`,
                         });
                       },
                     },
@@ -302,10 +331,16 @@ export default function Project({
         <div className="absolute top-0 left-0 h-screen w-screen bg-black/70 z-50 flex justify-center items-center">
           <Card className="p-4 flex flex-col justify-center items-center gap-4">
             <div className="flex gap-2 items-center text-lg font-semibold">
-              <h1>Processing</h1>
+              <h1>Processando</h1>
               <LoaderCircle className="size-[1em] animate-spin" />
             </div>
             <Progress value={processingProgress} className="w-96" />
+            
+            {/* BOTÃO DE CANCELAMENTO COM TEMPORIZADOR (T-10) */}
+            <CancelProcessButton 
+              isProcessing={processing} 
+              onCancel={handleCancel} 
+            />
           </Card>
         </div>
       </Transition>
