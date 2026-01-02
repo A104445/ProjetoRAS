@@ -687,3 +687,20 @@ export const processSharedProject = async ({
     throw new Error("Failed to process shared project");
 };
 
+export const cancelProjectProcessing = async ({
+  uid,
+  pid,
+  token,
+}: {
+  uid: string;
+  pid: string;
+  token: string;
+}) => {
+  const response = await api.delete(`/projects/${uid}/${pid}/process/cancel`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (response.status !== 204) throw new Error("Failed to cancel processing");
+};

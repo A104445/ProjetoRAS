@@ -40,3 +40,13 @@ module.exports.delete = (user_id, project_id, process_id) => {
     _id: process_id,
   });
 };
+
+module.exports.cancelProject = (user_id, project_id) => {
+  // Remove todos os processos ativos deste projeto
+  return Process.deleteMany({ user_id: user_id, project_id: project_id });
+};
+
+module.exports.cancelImage = (user_id, project_id, img_id) => {
+  // Remove os processos de uma imagem específica
+  return Process.deleteMany({ user_id: user_id, project_id: project_id, img_id: img_id });
+};

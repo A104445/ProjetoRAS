@@ -86,6 +86,10 @@ function process_msg() {
       const user_msg_id = `update-client-process-${uuidv4()}`;
 
       const process = await Process.getOne(msg_id);
+      if (!process) {
+        console.log(`[CANCEL] Processo ${msg_id} ignorado por cancelamento.`);
+        return; // Interrompe a cadeia aqui!
+      }
 
       const prev_process_input_img = process.og_img_uri;
       const prev_process_output_img = process.new_img_uri;
@@ -1308,139 +1312,69 @@ router.post("/:user/:project/reorder", (req, res, next) => {
 
 // Process a specific project
 router.post("/:user/:project/process", (req, res, next) => {
-  // Get project and create a new process entry
   Project.getOne(req.params.user, req.params.project)
     .then(async (project) => {
-      try {
-        const prev_results = await Result.getAll(
-          req.params.user,
-          req.params.project
-        );
-        for (let r of prev_results) {
-          await delete_image(
-            req.params.user,
-            req.params.project,
-            "out",
-            r.img_key
-          );
-          await Result.delete(r.user_id, r.project_id, r.img_id);
-        }
-      } catch (_) {
-        res.status(400).jsonp("Error deleting previous results");
-        return;
-      }
+      // Otimização: Eliminação de resultados anteriores em paralelo
+      const prev_results = await Result.getAll(req.params.user, req.params.project);
+      await Promise.all(prev_results.map(r => 
+        delete_image(req.params.user, req.params.project, "out", r.img_key)
+          .then(() => Result.delete(r.user_id, r.project_id, r.img_id))
+      ));
 
-      if (project.tools.length == 0) {
-        res.status(400).jsonp("No tools selected");
-        return;
-      }
+      if (project.tools.length == 0) return res.status(400).jsonp("No tools selected");
 
       const adv_tools = advanced_tool_num(project);
-      axios
-        .get(users_ms + `${req.params.user}/process/${adv_tools}`, {
-          httpsAgent: httpsAgent,
-        })
-        .then(async (resp) => {
-          const can_process = resp.data;
+      const resp = await axios.get(users_ms + `${req.params.user}/process/${adv_tools}`, { httpsAgent: httpsAgent });
+      
+      if (!resp.data) return res.status(404).jsonp("No more daily_operations available");
 
-          if (!can_process) {
-            res.status(404).jsonp("No more daily_operations available");
-            return;
-          }
+      const source_path = path.join(__dirname, `../images/users/${req.params.user}/projects/${req.params.project}/src`);
+      const result_path = path.join(__dirname, `../images/users/${req.params.user}/projects/${req.params.project}/out`);
 
-          const source_path = `/../images/users/${req.params.user}/projects/${req.params.project}/src`;
-          const result_path = `/../images/users/${req.params.user}/projects/${req.params.project}/out`;
+      // Otimização: Operações de pasta assíncronas
+      await fs.promises.rm(source_path, { recursive: true, force: true });
+      await fs.promises.mkdir(source_path, { recursive: true });
+      await fs.promises.rm(result_path, { recursive: true, force: true });
+      await fs.promises.mkdir(result_path, { recursive: true });
 
-          if (fs.existsSync(path.join(__dirname, source_path)))
-            fs.rmSync(path.join(__dirname, source_path), {
-              recursive: true,
-              force: true,
-            });
+      // REQUISITO T-03: Paralelização da preparação das imagens
+      const processingPromises = project.imgs.map(async (img) => {
+        try {
+          const img_data = await get_image_docker(req.params.user, req.params.project, "src", img.og_img_key);
+          const img_resp = await axios.get(img_data.data.url, { responseType: "stream" });
+          
+          const writer = fs.createWriteStream(img.og_uri);
+          img_resp.data.pipe(writer);
 
-          fs.mkdirSync(path.join(__dirname, source_path), { recursive: true });
+          await new Promise((resolve, reject) => {
+            writer.on("finish", resolve);
+            writer.on("error", reject);
+          });
 
-          if (fs.existsSync(path.join(__dirname, result_path)))
-            fs.rmSync(path.join(__dirname, result_path), {
-              recursive: true,
-              force: true,
-            });
+          const msg_id = `request-${uuidv4()}`;
+          const tool = project.tools.find(t => t.position === 0);
+          
+          const new_process = {
+            user_id: req.params.user,
+            project_id: req.params.project,
+            img_id: img._id,
+            msg_id: msg_id,
+            cur_pos: 0,
+            og_img_uri: img.og_uri,
+            new_img_uri: img.new_uri,
+          };
 
-          fs.mkdirSync(path.join(__dirname, result_path), { recursive: true });
+          await Process.create(new_process);
+          send_msg_tool(msg_id, new Date().toISOString(), new_process.og_img_uri, new_process.new_img_uri, tool.procedure, tool.params);
+        } catch (e) {
+          console.error("Erro no processamento paralelo de imagem:", e);
+        }
+      });
 
-          let error = false;
-
-          for (let img of project.imgs) {
-            let url = "";
-            try {
-              const resp = await get_image_docker(
-                req.params.user,
-                req.params.project,
-                "src",
-                img.og_img_key
-              );
-              url = resp.data.url;
-
-              const img_resp = await axios.get(url, { responseType: "stream" });
-
-              const writer = fs.createWriteStream(img.og_uri);
-
-              // Use a Promise to handle the stream completion
-              await new Promise((resolve, reject) => {
-                writer.on("finish", resolve);
-                writer.on("error", reject);
-                img_resp.data.pipe(writer); // Pipe AFTER setting up the event handlers
-              });
-            } catch (_) {
-              res.status(400).jsonp("Error acquiring source images");
-              return;
-            }
-
-            const msg_id = `request-${uuidv4()}`;
-            const timestamp = new Date().toISOString();
-
-            const og_img_uri = img.og_uri;
-            const new_img_uri = img.new_uri;
-            const tool = project.tools.filter((t) => t.position === 0)[0];
-
-            const tool_name = tool.procedure;
-            const params = tool.params;
-
-            const process = {
-              user_id: req.params.user,
-              project_id: req.params.project,
-              img_id: img._id,
-              msg_id: msg_id,
-              cur_pos: 0,
-              og_img_uri: og_img_uri,
-              new_img_uri: new_img_uri,
-            };
-
-            // Making sure database entry is created before sending message to avoid conflicts
-            await Process.create(process)
-              .then((_) => {
-                send_msg_tool(
-                  msg_id,
-                  timestamp,
-                  og_img_uri,
-                  new_img_uri,
-                  tool_name,
-                  params
-                );
-              })
-              .catch((_) => (error = true));
-          }
-
-          if (error)
-            res
-              .status(603)
-              .jsonp(
-                `There were some erros creating all process requests. Some results can be invalid.`
-              );
-          else res.sendStatus(201);
-        })
-        .catch((_) => res.status(400).jsonp(`Error checking if can process`));
+      await Promise.all(processingPromises);
+      res.sendStatus(201);
     })
-    .catch((_) => res.status(501).jsonp(`Error acquiring user's project`));
+    .catch((err) => res.status(500).jsonp("Error initiating parallel process"));
 });
 
 // Update a specific project
@@ -1651,6 +1585,13 @@ router.delete("/:user/:project/tool/:tool", (req, res, next) => {
       console.error("Error getting project:", err);
       res.status(501).jsonp(`Error acquiring user's project`);
     });
+});
+
+// Rota para cancelar o processamento de um projeto inteiro
+router.delete("/:user/:project/process/cancel", (req, res) => {
+  Process.cancelProject(req.params.user, req.params.project)
+    .then(() => res.sendStatus(204))
+    .catch((err) => res.status(500).jsonp(err));
 });
 
 module.exports = { router, process_msg };
