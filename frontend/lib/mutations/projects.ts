@@ -15,6 +15,11 @@ import {
   updateProjectTool,
   previewProjectImage,
   reorderProjectTools,
+  addSharedProjectTool,
+  updateSharedProjectTool,
+  deleteSharedProjectTool,
+  clearSharedProjectTools,
+  processSharedProject,
 } from "../projects";
 import { createBlobUrlFromFile, downloadBlob } from "../utils";
 
@@ -249,5 +254,59 @@ export const useReorderProjectTools = (
         queryKey: ["projectResults", uid, pid, token],
       });
     },
+  });
+};
+
+// ============ SHARED PROJECT MUTATIONS ============
+
+export const useAddSharedProjectTool = (pid: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: addSharedProjectTool,
+    onSuccess: () => {
+      qc.invalidateQueries({
+        refetchType: "all",
+        queryKey: ["sharedProject", pid],
+      });
+    },
+  });
+};
+
+export const useUpdateSharedProjectTool = (pid: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: updateSharedProjectTool,
+    onSuccess: () => {
+      qc.invalidateQueries({
+        refetchType: "all",
+        queryKey: ["sharedProject", pid],
+      });
+    },
+  });
+};
+
+export const useDeleteSharedProjectTool = (pid: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: deleteSharedProjectTool,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sharedProject", pid] });
+    },
+  });
+};
+
+export const useClearSharedProjectTools = (pid: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: clearSharedProjectTools,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sharedProject", pid] });
+    },
+  });
+};
+
+export const useProcessSharedProject = () => {
+  return useMutation({
+    mutationFn: processSharedProject,
   });
 };

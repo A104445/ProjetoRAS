@@ -46,6 +46,9 @@ export const useGetSocket = (token: string) => {
       }),
     refetchOnWindowFocus: false,
     refetchOnMount: false,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    structuralSharing: false,
   });
 };
 

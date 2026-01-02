@@ -149,8 +149,8 @@ export function ProjectImageList({
           // Grid view
           <div className="size-full flex flex-col items-center">
             {(mode === "edit" && project.imgs.length > 0) ||
-            (mode === "results" &&
-              (results.imgs.length > 0 || results.texts.length > 0)) ? (
+              (mode === "results" &&
+                (results.imgs.length > 0 || results.texts.length > 0)) ? (
               <>
                 {mode !== "results" && (
                   <div className="relative pt-4 pb-2 text-gray-500 text-sm after:h-2 after:bg-gradient-to-b after:from-background after:to-background/10 after:w-full after:absolute after:bottom-0 after:translate-y-2 after:z-50 w-full text-center flex flex-col">
@@ -161,15 +161,15 @@ export function ProjectImageList({
                   {(mode === "results" ? results.imgs : project.imgs).map(
                     (image, index) => (
                       <button
-                        key={image._id}
+                        key={image._id || image.og_img_id || `img-${index}`}
                         className="aspect-square"
                         onClick={() => {
                           setJumpTo(index);
-                          router.push(`?mode=${mode}&view=carousel`);
-                          qc.invalidateQueries({
-                            queryKey: ["socket"],
-                            refetchType: "all",
-                          });
+                          // Use router.push for proper navigation without full reload/remount issues if possible
+                          const newUrl = new URL(window.location.href);
+                          newUrl.searchParams.set("mode", mode);
+                          newUrl.searchParams.set("view", "carousel");
+                          router.push(newUrl.toString(), { scroll: false });
                         }}
                       >
                         <ProjectImage image={image} />
@@ -187,11 +187,10 @@ export function ProjectImageList({
                               ? results.imgs.length
                               : project.imgs.length) + index,
                           );
-                          router.push(`?mode=${mode}&view=carousel`);
-                          qc.invalidateQueries({
-                            queryKey: ["socket"],
-                            refetchType: "all",
-                          });
+                          const newUrl = new URL(window.location.href);
+                          newUrl.searchParams.set("mode", mode);
+                          newUrl.searchParams.set("view", "carousel");
+                          router.push(newUrl.toString(), { scroll: false });
                         }}
                       >
                         <ProjectText text={text.text} />
@@ -216,22 +215,22 @@ export function ProjectImageList({
               <CarouselContent className="aspect-auto h-[calc(100vh-99px-0.5rem-36px)] xl:h-[calc(100vh-55px-0.5rem-36px)]">
                 {mode === "edit" &&
                   project.imgs.length > 0 &&
-                  project.imgs.map((image) => (
-                    <CarouselItem key={image._id}>
+                  project.imgs.map((image, idx) => (
+                    <CarouselItem key={image._id || `edit-${idx}`}>
                       <ProjectImage image={image} animation={false} />
                     </CarouselItem>
                   ))}
                 {mode === "results" &&
                   results.imgs.length > 0 &&
-                  results.imgs.map((image) => (
-                    <CarouselItem key={image._id}>
+                  results.imgs.map((image, idx) => (
+                    <CarouselItem key={image._id || image.og_img_id || `result-img-${idx}`}>
                       <ProjectImage image={image} animation={false} />
                     </CarouselItem>
                   ))}
                 {mode === "results" &&
                   results.texts.length > 0 &&
-                  results.texts.map((text) => (
-                    <CarouselItem key={text.name}>
+                  results.texts.map((text, idx) => (
+                    <CarouselItem key={text.name || `result-txt-${idx}`}>
                       <ProjectText text={text.text} />
                     </CarouselItem>
                   ))}

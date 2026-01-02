@@ -47,6 +47,112 @@ router.get("/shared/:projectId", auth.checkAuth, function (req, res, next) {
     });
 });
 
+/**
+ * Get shared project results (for viewers/editors)
+ */
+router.get("/shared/:projectId/results", auth.checkAuth, function (req, res, next) {
+  axios
+    .get(projectsURL + `shared/${req.params.projectId}/results`, {
+      params: { userId: req.userId },
+      httpsAgent: httpsAgent,
+    })
+    .then((resp) => res.status(200).jsonp(resp.data))
+    .catch((err) => {
+      console.error("Error fetching shared project results:", err.response?.data || err.message);
+      const status = err.response?.status || 500;
+      const message = err.response?.data?.error || "Error fetching shared project results";
+      res.status(status).jsonp({ error: message });
+    });
+});
+
+// ==================== SHARED EDITOR ROUTES ====================
+
+/**
+ * Add tool to shared project (editors only)
+ */
+router.post("/shared/:projectId/tool", auth.checkAuth, function (req, res, next) {
+  axios
+    .post(projectsURL + `shared/${req.params.projectId}/tool`, req.body, {
+      params: { userId: req.userId },
+      httpsAgent: httpsAgent,
+    })
+    .then((resp) => res.status(201).jsonp(resp.data))
+    .catch((err) => {
+      const status = err.response?.status || 500;
+      const message = err.response?.data?.error || "Error adding tool";
+      res.status(status).jsonp({ error: message });
+    });
+});
+
+/**
+ * Update tool on shared project (editors only)
+ */
+router.put("/shared/:projectId/tool/:toolId", auth.checkAuth, function (req, res, next) {
+  axios
+    .put(projectsURL + `shared/${req.params.projectId}/tool/${req.params.toolId}`, req.body, {
+      params: { userId: req.userId },
+      httpsAgent: httpsAgent,
+    })
+    .then(() => res.sendStatus(204))
+    .catch((err) => {
+      const status = err.response?.status || 500;
+      const message = err.response?.data?.error || "Error updating tool";
+      res.status(status).jsonp({ error: message });
+    });
+});
+
+/**
+ * Delete tool from shared project (editors only)
+ */
+router.delete("/shared/:projectId/tool/:toolId", auth.checkAuth, function (req, res, next) {
+  axios
+    .delete(projectsURL + `shared/${req.params.projectId}/tool/${req.params.toolId}`, {
+      params: { userId: req.userId },
+      httpsAgent: httpsAgent,
+    })
+    .then(() => res.sendStatus(204))
+    .catch((err) => {
+      const status = err.response?.status || 500;
+      const message = err.response?.data?.error || "Error deleting tool";
+      res.status(status).jsonp({ error: message });
+    });
+});
+
+/**
+ * Clear all tools from shared project (editors only)
+ */
+router.delete("/shared/:projectId/tools", auth.checkAuth, function (req, res, next) {
+  axios
+    .delete(projectsURL + `shared/${req.params.projectId}/tools`, {
+      params: { userId: req.userId },
+      httpsAgent: httpsAgent,
+    })
+    .then(() => res.sendStatus(204))
+    .catch((err) => {
+      const status = err.response?.status || 500;
+      const message = err.response?.data?.error || "Error clearing tools";
+      res.status(status).jsonp({ error: message });
+    });
+});
+
+/**
+ * Process a shared project (editors only)
+ */
+router.post("/shared/:projectId/process", auth.checkAuth, function (req, res, next) {
+  axios
+    .post(projectsURL + `shared/${req.params.projectId}/process`, req.body, {
+      params: { userId: req.userId },
+      httpsAgent: httpsAgent,
+    })
+    .then((resp) => res.status(201).jsonp(resp.data))
+    .catch((err) => {
+      console.error("Error processing shared project:", err.response?.data || err.message);
+      const status = err.response?.status || 500;
+      const message = err.response?.data?.error || "Error processing project";
+      res.status(status).jsonp({ error: message });
+    });
+});
+
 // --- Share Routes (Nested under /projects) ---
 
 /**

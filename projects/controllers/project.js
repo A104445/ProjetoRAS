@@ -129,12 +129,12 @@ module.exports.checkPermission = async (project_id, user_id) => {
 
   // Check if editor
   if (project.permissions?.editors?.some(id => id.equals(userIdObj))) {
-    return { hasAccess: true, role: "editor" };
+    return { hasAccess: true, role: "edit" };
   }
 
   // Check if viewer
   if (project.permissions?.viewers?.some(id => id.equals(userIdObj))) {
-    return { hasAccess: true, role: "viewer" };
+    return { hasAccess: true, role: "view" };
   }
 
   return { hasAccess: false, role: null };

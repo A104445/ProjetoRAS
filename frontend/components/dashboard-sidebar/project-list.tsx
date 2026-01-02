@@ -132,15 +132,37 @@ export default function ProjectList() {
           <SidebarMenu>
             {!sharedProjects.isLoading &&
               sharedProjects.data &&
-              sharedProjects.data.shares.length > 0 &&
-              sharedProjects.data.shares.map((share) => (
+              Object.values(
+                sharedProjects.data.shares.reduce(
+                  (acc, share) => {
+                    const pid = share.projectId;
+                    // Skip if the user is already the owner of this project
+                    const isOwner = projects.data?.some((p) => p._id === pid);
+                    if (isOwner) return acc;
+
+                    if (
+                      !acc[pid] ||
+                      (acc[pid].permission === "view" &&
+                        share.permission === "edit")
+                    ) {
+                      acc[pid] = share;
+                    }
+                    return acc;
+                  },
+                  {} as Record<string, (typeof sharedProjects.data.shares)[0]>,
+                ),
+              ).map((share) => (
                 <SidebarMenuItem key={share.shareId}>
                   <SidebarMenuButton
                     asChild
-                    isActive={path.includes(`/dashboard/shared/${share.projectId}`)}
+                    isActive={path.includes(
+                      `/dashboard/shared/${share.projectId}`,
+                    )}
                     className="h-fit py-1 flex items-center"
                   >
-                    <Link href={`/dashboard/shared/${share.projectId}?permission=${share.permission}`}>
+                    <Link
+                      href={`/dashboard/shared/${share.projectId}?permission=${share.permission}`}
+                    >
                       {share.projectName}
                     </Link>
                   </SidebarMenuButton>
