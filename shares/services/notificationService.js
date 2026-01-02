@@ -1,26 +1,28 @@
 /**
  * WebSocket Notification Service
- * 
+ *
  * This service provides methods to queue notifications that should be sent to clients.
  * Since the shares service doesn't have direct WebSocket access (it's in wsGateway),
- * we use Redis pub/sub to communicate notifications to the WebSocket gateway.
+ * we use RabbitMQ to communicate notifications to the WebSocket gateway (ws_queue).
  */
 
-const { getRedis } = require('../config/redis');
+const { publish } = require('../utils/rabbit_mq');
 
-const NOTIFICATION_CHANNEL = 'shares:notifications';
+const WS_QUEUE = 'ws_queue';
 
 /**
- * Publish a notification to the WebSocket gateway via Redis pub/sub
- * @param {string} event - Event name
+ * Publish a notification to the WebSocket gateway via RabbitMQ
+ * @param {string} type - Event type
  * @param {object} payload - Event payload
  */
-async function publishNotification(event, payload) {
+async function publishNotification(type, payload) {
     try {
-        const redis = getRedis();
-        const message = JSON.stringify({ event, payload, timestamp: Date.now() });
-        await redis.publish(NOTIFICATION_CHANNEL, message);
-        console.log(`📤 Published notification: ${event}`);
+        await publish(WS_QUEUE, {
+            type,
+            ...payload,
+            timestamp: Date.now()
+        });
+        console.log(`Published notification: ${type}`);
     } catch (error) {
         console.error('Failed to publish notification:', error);
     }
@@ -30,7 +32,7 @@ async function publishNotification(event, payload) {
  * Notify about lock acquisition
  */
 async function notifyLockAcquired(projectId, editorId, editorName) {
-    await publishNotification('lock:acquired', {
+    await publishNotification('lock-acquired-broadcast', {
         projectId,
         editorId,
         editorName
@@ -40,20 +42,21 @@ async function notifyLockAcquired(projectId, editorId, editorName) {
 /**
  * Notify about lock release
  */
-async function notifyLockReleased(projectId, releasedBy) {
-    await publishNotification('lock:released', {
+async function notifyLockReleased(projectId, releasedBy, nextEditor = null) {
+    await publishNotification('lock-released', {
         projectId,
-        releasedBy
+        releasedBy,
+        nextEditor
     });
 }
 
 /**
  * Notify about lock expiration
  */
-async function notifyLockExpired(projectId, sessionId, reason) {
-    await publishNotification('lock:expired', {
+async function notifyLockExpired(projectId, userId, reason) {
+    await publishNotification('lock-expired', {
         projectId,
-        sessionId,
+        userId,
         reason
     });
 }
@@ -61,10 +64,10 @@ async function notifyLockExpired(projectId, sessionId, reason) {
 /**
  * Notify about inactivity warning
  */
-async function notifyInactivityWarning(projectId, sessionId, expiresIn) {
-    await publishNotification('lock:inactivity-warning', {
+async function notifyInactivityWarning(projectId, userId, expiresIn) {
+    await publishNotification('lock-inactivity-warning', {
         projectId,
-        sessionId,
+        userId,
         expiresIn
     });
 }
@@ -73,13 +76,13 @@ async function notifyInactivityWarning(projectId, sessionId, expiresIn) {
  * Notify about queue position update
  */
 async function notifyQueueUpdate(projectId, queue) {
-    await publishNotification('lock:queue-update', {
+    await publishNotification('lock-queue-update', {
         projectId,
         queue: queue.map((q, index) => ({
             userId: q.userId.toString(),
             userName: q.userName,
             position: index + 1,
-            estimatedWait: (index + 1) * 5 * 60
+            estimatedWait: (index + 1) * 1 * 60
         }))
     });
 }
@@ -88,22 +91,22 @@ async function notifyQueueUpdate(projectId, queue) {
  * Notify about user promotion from queue
  */
 async function notifyUserPromoted(projectId, userId, userName, sessionId) {
-    await publishNotification('lock:promoted', {
+    await publishNotification('lock-promoted', {
         projectId,
         userId,
         userName,
         sessionId,
-        expiresAt: new Date(Date.now() + 7 * 60 * 1000)
+        expiresAt: new Date(Date.now() + 1 * 60 * 1000)
     });
 }
 
 /**
  * Notify about lock lost due to reconciliation
  */
-async function notifyLockLost(projectId, sessionId, reason) {
-    await publishNotification('lock:lost', {
+async function notifyLockLost(projectId, userId, reason) {
+    await publishNotification('lock-lost', {
         projectId,
-        sessionId,
+        userId,
         reason
     });
 }
@@ -112,7 +115,7 @@ async function notifyLockLost(projectId, sessionId, reason) {
  * Notify about user joining project session
  */
 async function notifyUserJoined(projectId, userId, userName, role) {
-    await publishNotification('session:user-joined', {
+    await publishNotification('session-user-joined', {
         projectId,
         userId,
         userName,
@@ -124,7 +127,7 @@ async function notifyUserJoined(projectId, userId, userName, role) {
  * Notify about user leaving project session
  */
 async function notifyUserLeft(projectId, userId) {
-    await publishNotification('session:user-left', {
+    await publishNotification('session-user-left', {
         projectId,
         userId
     });
@@ -141,5 +144,5 @@ module.exports = {
     notifyLockLost,
     notifyUserJoined,
     notifyUserLeft,
-    NOTIFICATION_CHANNEL
+    WS_QUEUE
 };

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir /s /b \"c:\\\\Users\\\\paulo\\\\Desktop\\\\ProjetoRAS\\\\picturas-main\\\\shares\\\\src\\\\*.ts\")",
+      "Bash(dir /s /b \"c:\\\\Users\\\\paulo\\\\Desktop\\\\ProjetoRAS\\\\picturas-main\\\\wsGateway\\\\src\\\\*.ts\")"
+    ]
+  }
+}

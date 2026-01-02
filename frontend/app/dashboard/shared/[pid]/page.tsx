@@ -113,7 +113,6 @@ export default function SharedProject({
     // Debugging dependencies
     const prevSocketData = useRef(socket.data);
     const prevPid = useRef(pid);
-    const prevQc = useRef(qc);
 
     // Combined effect for socket connection, room joining, and lock management
     useEffect(() => {
@@ -127,10 +126,6 @@ export default function SharedProject({
         if (pid !== prevPid.current) {
             console.log("Shared Effect re-run due to: pid changed");
             prevPid.current = pid;
-        }
-        if (qc !== prevQc.current) {
-            console.log("Shared Effect re-run due to: qc changed");
-            prevQc.current = qc;
         }
 
         // Join the project room
@@ -207,10 +202,9 @@ export default function SharedProject({
             });
 
             socket.data.on("lock-released", () => {
-                console.log("Lock released event received");
+                console.log("Lock released - backend will auto-promote queue");
+                // Backend automatically promotes next in queue, no need to request
                 setLockState({ isLocked: false, lockedBy: null, hasLock: false, expiresAt: null });
-                // Auto-request lock again when released
-                socket.data.emit("request-lock", { projectId: pid });
             });
 
             socket.data.on("lock-extended", () => {

@@ -250,6 +250,8 @@ services:
         condition: service_healthy
       shares_mongoDB:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     ports:
       - "9003:9003"
     restart: on-failure
@@ -258,6 +260,10 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - BASE_URL=http://localhost:8080
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=user
+      - RABBITMQ_PASS=password
     networks:
       - elk
     volumes:

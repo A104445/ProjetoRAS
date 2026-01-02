@@ -8,6 +8,7 @@
         "test": "jest --forceExit"
     },
     "dependencies": {
+        "amqplib": "^0.10.5",
         "axios": "^1.13.2",
         "cookie-parser": "~1.4.4",
         "crypto": "^1.0.1",

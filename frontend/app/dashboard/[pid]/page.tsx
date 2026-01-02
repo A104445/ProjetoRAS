@@ -99,8 +99,6 @@ export default function Project({
   // Debugging dependencies
   const prevSocketData = useRef(socket.data);
   const prevPid = useRef(pid);
-  const prevQc = useRef(qc);
-  const prevUserId = useRef(session.user._id);
 
   // Join project room as owner (stable connection)
   const joinedRef = useRef(false);
@@ -115,14 +113,6 @@ export default function Project({
     if (pid !== prevPid.current) {
       console.log("Effect re-run due to: pid changed");
       prevPid.current = pid;
-    }
-    if (qc !== prevQc.current) {
-      console.log("Effect re-run due to: qc changed");
-      prevQc.current = qc;
-    }
-    if (session.user._id !== prevUserId.current) {
-      console.log("Effect re-run due to: user._id changed");
-      prevUserId.current = session.user._id;
     }
 
     if (!joinedRef.current) {
@@ -160,6 +150,7 @@ export default function Project({
 
     // Clean up before adding
     socket.data.off("lock-acquired");
+    socket.data.off("lock-queued");
     socket.data.off("lock-denied");
     socket.data.off("project-locked");
     socket.data.off("lock-released");
@@ -171,6 +162,15 @@ export default function Project({
     socket.data.on("lock-acquired", () => {
       console.log("Lock acquired!");
       setLockState((prev: typeof lockState) => ({ ...prev, isLocked: true, lockedBy: session.user._id, hasLock: true, expiresAt: Date.now() + 60 * 1000 }));
+    });
+
+    socket.data.on("lock-queued", ({ position }: { position: number }) => {
+      console.log("Owner queued for lock, position:", position);
+      setLockState({ isLocked: true, lockedBy: null, hasLock: false, expiresAt: null });
+      toast({
+        title: "Waiting for edit access",
+        description: `You are #${position} in line. You'll be promoted automatically when it's your turn.`,
+      });
     });
 
     socket.data.on("lock-denied", ({ lockedBy }: { lockedBy: string }) => {
@@ -192,14 +192,9 @@ export default function Project({
     });
 
     socket.data.on("lock-released", () => {
-      console.log("Lock released, requesting...");
-      setLockState((prev: typeof lockState) => {
-        if (!prev.hasLock) {
-          socket.data.emit("request-lock", { projectId: pid });
-          return { isLocked: false, lockedBy: null, hasLock: false, expiresAt: null };
-        }
-        return prev;
-      });
+      console.log("Lock released - backend will auto-promote queue");
+      // Backend automatically promotes next in queue, no need to request
+      setLockState({ isLocked: false, lockedBy: null, hasLock: false, expiresAt: null });
     });
 
     socket.data.on("lock-extended", () => {
@@ -213,6 +208,7 @@ export default function Project({
       if (socket.data) {
         socket.data.emit("release-lock", { projectId: pid });
         socket.data.off("lock-acquired");
+        socket.data.off("lock-queued");
         socket.data.off("lock-denied");
         socket.data.off("project-locked");
         socket.data.off("lock-released");

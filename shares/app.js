@@ -8,6 +8,8 @@ const { connectRedis } = require("./config/redis");
 
 const sharesRouter = require("./routes/shares");
 const locksRouter = require("./routes/locks");
+const { connect: connectRabbitMQ } = require("./utils/rabbit_mq");
+const { startConsumer: startLocksConsumer } = require("./services/locksConsumer");
 
 // MongoDB connection
 const mongoDB = process.env.MONGO_URI || "mongodb://shares_mongoDB:27020/shares";
@@ -21,9 +23,18 @@ db.once("open", () => {
     console.log("✅ MongoDB connection successful");
 
     // Connect to Redis after MongoDB is ready
-    connectRedis().then(() => {
+    connectRedis().then(async () => {
         // Start background jobs
         require("./services/lockManager").startBackgroundJobs();
+
+        // Connect to RabbitMQ and start locks consumer
+        try {
+            await connectRabbitMQ();
+            await startLocksConsumer();
+            console.log("✅ Locks RPC consumer ready");
+        } catch (err) {
+            console.error("❌ RabbitMQ setup failed:", err);
+        }
     }).catch(err => {
         console.error("❌ Redis connection failed:", err);
     });
