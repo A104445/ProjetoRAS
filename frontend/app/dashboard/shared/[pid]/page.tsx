@@ -202,8 +202,7 @@ export default function SharedProject({
             });
 
             socket.data.on("lock-released", () => {
-                console.log("Lock released - backend will auto-promote queue");
-                // Backend automatically promotes next in queue, no need to request
+                console.log("Lock released - user can manually join queue");
                 setLockState({ isLocked: false, lockedBy: null, hasLock: false, expiresAt: null });
             });
 
@@ -452,6 +451,23 @@ export default function SharedProject({
                                         )}
                                     </Button>
                                 </>
+                            )}
+                            {/* Request Lock button when editor doesn't have lock */}
+                            {isEditor && !lockState.hasLock && (
+                                <Button
+                                    onClick={() => {
+                                        if (socket.data && pid) {
+                                            socket.data.emit("request-lock", { projectId: pid });
+                                            toast({
+                                                title: "Requesting edit access",
+                                                description: "You'll be notified when it's your turn to edit.",
+                                            });
+                                        }
+                                    }}
+                                    variant="outline"
+                                >
+                                    Request Lock
+                                </Button>
                             )}
                             <Button
                                 variant="outline"
