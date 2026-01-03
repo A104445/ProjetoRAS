@@ -816,6 +816,40 @@ router.post("/shared/:projectId/process", async (req, res) => {
   }
 });
 
+/**
+ * Cancel shared project processing (editors only)
+ */
+router.delete("/shared/:projectId/process/cancel", async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId query parameter is required" });
+    }
+
+    const permCheck = await Project.checkPermission(projectId, userId);
+    if (!permCheck.hasAccess || (permCheck.role !== 'edit' && permCheck.role !== 'owner')) {
+      return res.status(403).json({ error: "Edit access required" });
+    }
+
+    const project = await Project.getById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const ownerId = project.user_id.toString();
+
+    await Process.cancelProject(ownerId, projectId);
+
+    send_project_update(projectId, 'processing-cancelled', { userId });
+    res.sendStatus(204);
+  } catch (error) {
+    console.error("Error canceling shared project processing:", error);
+    res.status(500).json({ error: "Error canceling processing" });
+  }
+});
+
 // Get list of all projects from a user
 router.get("/:user", (req, res, next) => {
   Project.getAll(req.params.user)

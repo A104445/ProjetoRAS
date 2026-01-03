@@ -153,6 +153,24 @@ router.post("/shared/:projectId/process", auth.checkAuth, function (req, res, ne
     });
 });
 
+/**
+ * Cancel shared project processing (editors only)
+ */
+router.delete("/shared/:projectId/process/cancel", auth.checkAuth, function (req, res, next) {
+  axios
+    .delete(projectsURL + `shared/${req.params.projectId}/process/cancel`, {
+      params: { userId: req.userId },
+      httpsAgent: httpsAgent,
+    })
+    .then(() => res.sendStatus(204))
+    .catch((err) => {
+      console.error("Error canceling shared project processing:", err.response?.data || err.message);
+      const status = err.response?.status || 500;
+      const message = err.response?.data?.error || "Error canceling processing";
+      res.status(status).jsonp({ error: message });
+    });
+});
+
 // --- Share Routes (Nested under /projects) ---
 
 /**
