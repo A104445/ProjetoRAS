@@ -10,8 +10,9 @@ export function CancelProcessButton({ isProcessing, onCancel }: { isProcessing: 
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (isProcessing) {
-      // REQUISITO T-10: Icon aparece após 10s
-      timer = setTimeout(() => setShowCancel(true), 10000);
+      // REQUISITO T-10: Icon aparece após 10s (10000ms)
+      // 10ms para efeitos de teste
+      timer = setTimeout(() => setShowCancel(true), 10);
     } else {
       setShowCancel(false);
     }

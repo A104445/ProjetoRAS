@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const toolSchema = new mongoose.Schema({
   position: { type: Number, required: true },
   procedure: { type: String, required: true },
-  params: { type: mongoose.Schema.Types.Mixed, required: true }, // This field can be any type of object
+  params: { type: mongoose.Schema.Types.Mixed, required: true },
 });
 
 const imgSchema = new mongoose.Schema({

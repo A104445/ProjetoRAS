@@ -704,3 +704,19 @@ export const cancelProjectProcessing = async ({
 
   if (response.status !== 204) throw new Error("Failed to cancel processing");
 };
+
+export const cancelSharedProjectProcessing = async ({
+  pid,
+  token,
+}: {
+  pid: string;
+  token: string;
+}) => {
+  const response = await api.delete(`/projects/shared/${pid}/process/cancel`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (response.status !== 204) throw new Error("Failed to cancel shared project processing");
+};

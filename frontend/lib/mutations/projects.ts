@@ -21,6 +21,7 @@ import {
   clearSharedProjectTools,
   processSharedProject,
   cancelProjectProcessing,
+  cancelSharedProjectProcessing,
 } from "../projects";
 import { createBlobUrlFromFile, downloadBlob } from "../utils";
 
@@ -320,6 +321,17 @@ export const useCancelProjectProcess = (uid: string, pid: string, token: string)
       // T-01: Limpar as caches para restaurar o estado original
       qc.invalidateQueries({ queryKey: ["project", uid, pid, token] });
       qc.invalidateQueries({ queryKey: ["projectResults", uid, pid, token] });
+    },
+  });
+};
+
+export const useCancelSharedProjectProcess = (pid: string, token: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => cancelSharedProjectProcessing({ pid, token }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sharedProject", pid] });
+      qc.invalidateQueries({ queryKey: ["sharedProjectResults", pid] });
     },
   });
 };
