@@ -170,23 +170,23 @@ function setupRabbitMQ() {
         }
     });
 
-    // 2. [NOVO] Consumidor de Eventos de Partilha (Share Events Queue)
-    // Escuta a fila 'share_events_queue' para notificações de reordenação e outros eventos de colaboração
-    read_rabbit_msg("share_events_queue", (msg) => {
-        try {
-            const event = JSON.parse(msg.content.toString());
-            console.log(`[WS Share] Event received: ${event.type} for project ${event.projectId}`);
+    // // 2. [NOVO] Consumidor de Eventos de Partilha (Share Events Queue)
+    // // Escuta a fila 'share_events_queue' para notificações de reordenação e outros eventos de colaboração
+    // read_rabbit_msg("share_events_queue", (msg) => {
+    //     try {
+    //         const event = JSON.parse(msg.content.toString());
+    //         console.log(`[WS Share] Event received: ${event.type} for project ${event.projectId}`);
 
-            // Envia para a sala do projeto, garantindo que eventos como 'tools-reordered' chegam ao frontend
-            if (event.projectId) {
-                // Se o evento vier com payload dentro de 'data', usa-o, senão usa o próprio evento
-                const payload = event.payload || event.data || event;
-                io.to(`project:${event.projectId}`).emit(event.type, payload);
-            }
-        } catch (e) {
-            console.error("Error processing Share Queue message:", e);
-        }
-    });
+    //         // Envia para a sala do projeto, garantindo que eventos como 'tools-reordered' chegam ao frontend
+    //         if (event.projectId) {
+    //             // Se o evento vier com payload dentro de 'data', usa-o, senão usa o próprio evento
+    //             const payload = event.payload || event.data || event;
+    //             io.to(`project:${event.projectId}`).emit(event.type, payload);
+    //         }
+    //     } catch (e) {
+    //         console.error("Error processing Share Queue message:", e);
+    //     }
+    // });
 }
 
 // ==================== SOCKET CONNECTIONS ====================
