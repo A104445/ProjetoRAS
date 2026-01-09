@@ -45,12 +45,36 @@ function useGetSharedProjectResults(projectId: string, token: string) {
     return useQuery({
         queryKey: ["sharedProjectResults", projectId],
         queryFn: async () => {
-            const response = await api.get(`/projects/shared/${projectId}/results`, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            return response.data as {
+            const response = await api.get<{
                 imgs: { og_img_id: string; name: string; url: string }[];
                 texts: { og_img_id: string; name: string; url: string }[];
+            }>(`/projects/shared/${projectId}/results`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+
+            // Fetch text content for each text result
+            const texts = [];
+            for (const text of response.data.texts) {
+                try {
+                    const textResponse = await fetch(text.url);
+                    const textContent = await textResponse.text();
+                    texts.push({
+                        _id: text.og_img_id,
+                        name: text.name,
+                        text: textContent,
+                    });
+                } catch (err) {
+                    console.error("Failed to fetch text content:", err);
+                }
+            }
+
+            return {
+                imgs: response.data.imgs.map((img: { og_img_id: string; name: string; url: string }) => ({
+                    _id: img.og_img_id,
+                    name: img.name,
+                    url: img.url,
+                })),
+                texts,
             };
         },
         enabled: !!projectId && !!token,

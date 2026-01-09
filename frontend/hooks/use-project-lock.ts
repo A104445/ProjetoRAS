@@ -28,13 +28,13 @@ export function useProjectLock(projectId: string, isEditor: boolean, token: stri
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
 
   // Função para enviar Heartbeat (Manter o lock vivo)
-  const sendHeartbeat = useCallback(async () => {
-    try {
-      await api.post(`/shares/lock/${projectId}/keepalive`, { stillEditing: true });
-    } catch (error) {
-      console.error("Heartbeat failed:", error);
-    }
-  }, [projectId]);
+  // const sendHeartbeat = useCallback(async () => {
+  //   try {
+  //     await api.post(`/shares/lock/${projectId}/keepalive`, { stillEditing: true });
+  //   } catch (error) {
+  //     console.error("Heartbeat failed:", error);
+  //   }
+  // }, [projectId]);
 
   useEffect(() => {
     if (!socket.data || !projectId) return;

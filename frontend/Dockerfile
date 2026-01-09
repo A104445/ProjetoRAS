@@ -11,6 +11,6 @@ COPY . .
 
 EXPOSE 3000
 # para produção:
-# CMD ["bun", "start"]
+CMD ["bun", "start"]
 # para dev:
-CMD ["bun", "dev"]
+# CMD ["bun", "dev"]
