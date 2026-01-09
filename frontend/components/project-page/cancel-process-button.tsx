@@ -12,7 +12,7 @@ export function CancelProcessButton({ isProcessing, onCancel }: { isProcessing: 
     if (isProcessing) {
       // REQUISITO T-10: Icon aparece após 10s (10000ms)
       // 10ms para efeitos de teste
-      timer = setTimeout(() => setShowCancel(true), 10);
+      timer = setTimeout(() => setShowCancel(true), 10000);
     } else {
       setShowCancel(false);
     }
