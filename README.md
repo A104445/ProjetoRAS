@@ -47,7 +47,7 @@ PictuRAS is built using a microservices architecture with the following componen
 - **Subscription Service**: Payment and subscription management (Port: 11001)
 - **Image Storage Service**: File upload and management (Port: 11000)
 - **WebSocket Gateway**: Real-time communication (Port: 4000)
-
+- **Shares Service(New)**: Service to manage shares and system of colaboration
 ### Processing Tools
 
 - **Background Removal AI**: Advanced background removal using AI models
@@ -87,8 +87,12 @@ PictuRAS is built using a microservices architecture with the following componen
    ```bash
    docker compose up
    ```
+3. **May be needed to build first(build fresh)**
+   ```bash
+    docker compose build
+   ```
 
-3. **Access the application**
+5. **Access the application**
    - Frontend: http://localhost:8080
    - API Gateway: http://localhost:8000
    - MinIO Console: http://localhost:9090 (admin/admin123)
@@ -175,6 +179,11 @@ This project was developed by **Group A** students in the context of the Curricu
 - **PG55989** - Nuno Ricardo Silva Gomes
 
 _Note: Some minor improvements and adjustments have been introduced by the course lecturers._
+## Remake by:
+
+- Paulo Alves
+- Alexandre Miranda
+- Gonçalo Magalhães
 
 ## 📄 License
 
