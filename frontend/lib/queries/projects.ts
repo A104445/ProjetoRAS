@@ -39,7 +39,7 @@ export const useGetSocket = (token: string) => {
   return useQuery({
     queryKey: ["socket", token],
     queryFn: () =>
-      io({
+      io("http://localhost:8080", {
         auth: {
           token: token,
         },

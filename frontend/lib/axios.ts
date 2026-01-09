@@ -1,7 +1,7 @@
 import axios, { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from "axios";
 
 export const api = axios.create({
-  baseURL: "/api-gateway/",
+  baseURL: "http://localhost:8080/api-gateway/",
 });
 
 // Add request interceptor to include JWT token in headers

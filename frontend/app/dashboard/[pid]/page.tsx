@@ -83,7 +83,7 @@ export default function SharedProject({ params }: { params: Promise<{ pid: strin
 
     // Permission handling
     const serverRole = project.data?._accessRole;
-    const urlPermission = searchParams.get("permission") ?? "view";
+    const urlPermission = searchParams.get("permission") ?? "edit";
     
     // Lógica de Permissões: É editor se o URL disser "edit" E o servidor confirmar a role
     const verifiedPermission = serverRole === "edit" || serverRole === "owner" ? urlPermission : "view";
