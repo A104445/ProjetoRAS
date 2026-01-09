@@ -43,14 +43,6 @@ module.exports.checkAuth = (req, res, next) => {
       // Get user type (default to 'free' for old JWTs without type field)
       const userType = payload.type || "free";
 
-      // Block anonymous users
-      if (userType === "anonymous") {
-        return res.status(403).json({
-          error: true,
-          message: "Anonymous users cannot access this resource. Please login or register."
-        });
-      }
-
       // Set userId and userType on request for downstream handlers
       req.userId = payload.id;
       req.userType = userType;
@@ -100,11 +92,6 @@ module.exports.optionalAuth = (req, res, next) => {
       if (Date.now() >= exp * 1000) {
         // Expired token - proceed without userId
         return next();
-      }
-
-      // Block anonymous users from being "authenticated"
-      if (payload.type === "anonymous") {
-        return next(); // Treat as unauthenticated
       }
 
       // Valid token - set userId and userType
