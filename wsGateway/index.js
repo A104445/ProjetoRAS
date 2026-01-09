@@ -11,7 +11,7 @@ httpServer.listen(4000);
 const io = socketIo(httpServer, {
     cors: {
         origin: "*",
-        methods: ["GET", "POST", "UPDATE", "DELETE"],
+        methods: ["GET", "POST", "UPDATE", "DELETE", "PUT", "PATCH", "OPTIONS"],
     },
 });
 
