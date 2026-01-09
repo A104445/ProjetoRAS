@@ -1,6 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useGetSocket } from "@/lib/queries/projects";
-import { api } from "@/lib/axios";
 import { useToast } from "@/hooks/use-toast";
 
 interface LockState {
@@ -15,7 +14,7 @@ interface LockState {
 export function useProjectLock(projectId: string, isEditor: boolean, token: string) {
   const socket = useGetSocket(token);
   const { toast } = useToast();
-  
+
   const [lockState, setLockState] = useState<LockState>({
     hasLock: false,
     isLocked: false,
@@ -24,17 +23,6 @@ export function useProjectLock(projectId: string, isEditor: boolean, token: stri
     queuePosition: null,
     estimatedWait: null
   });
-
-  const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Função para enviar Heartbeat (Manter o lock vivo)
-  // const sendHeartbeat = useCallback(async () => {
-  //   try {
-  //     await api.post(`/shares/lock/${projectId}/keepalive`, { stillEditing: true });
-  //   } catch (error) {
-  //     console.error("Heartbeat failed:", error);
-  //   }
-  // }, [projectId]);
 
   useEffect(() => {
     if (!socket.data || !projectId) return;
@@ -45,29 +33,25 @@ export function useProjectLock(projectId: string, isEditor: boolean, token: stri
     s.emit("join-project", projectId);
 
     // 2. Ouvir eventos de Lock
-    
+
     // Quando EU ganho o lock
     s.on("lock-acquired", () => {
-      setLockState(prev => ({ 
-        ...prev, 
-        hasLock: true, 
-        isLocked: true, 
+      setLockState(prev => ({
+        ...prev,
+        hasLock: true,
+        isLocked: true,
         queuePosition: null,
         lockedBy: "me",
         lockedByName: "Mim"
       }));
       toast({ title: "Modo de Edição", description: "Assumiu o controlo do projeto." });
-      
-      // Iniciar heartbeats a cada 20s (o timeout do server é 60s)
-      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
-      heartbeatRef.current = setInterval(sendHeartbeat, 20000);
     });
 
     // Quando entro na FILA
     s.on("lock-queued", (data: { position: number, estimatedWait?: number }) => {
-      setLockState(prev => ({ 
-        ...prev, 
-        hasLock: false, 
+      setLockState(prev => ({
+        ...prev,
+        hasLock: false,
         queuePosition: data.position,
         estimatedWait: data.estimatedWait || data.position * 5 * 60
       }));
@@ -101,29 +85,22 @@ export function useProjectLock(projectId: string, isEditor: boolean, token: stri
 
     // Quando o projeto é LIBERTADO
     s.on("lock-released", () => {
-       setLockState(prev => {
-         if (prev.hasLock && heartbeatRef.current) {
-            clearInterval(heartbeatRef.current);
-         }
-         return {
-           hasLock: false,
-           isLocked: false,
-           lockedBy: null,
-           lockedByName: null,
-           queuePosition: null,
-           estimatedWait: null
-         };
+       setLockState({
+         hasLock: false,
+         isLocked: false,
+         lockedBy: null,
+         lockedByName: null,
+         queuePosition: null,
+         estimatedWait: null
        });
-       // Se eu estava na fila ou queria editar, tento pedir outra vez automaticamente?
-       // Por agora não, o utilizador clica ou o backend promove da fila.
     });
 
     // Atualização da fila
     s.on("lock-queue-position", (data: { position: number, estimatedWait?: number }) => {
-       setLockState(prev => ({ 
-           ...prev, 
+       setLockState(prev => ({
+           ...prev,
            queuePosition: data.position,
-           estimatedWait: data.estimatedWait || prev.estimatedWait 
+           estimatedWait: data.estimatedWait || prev.estimatedWait
         }));
     });
 
@@ -136,9 +113,6 @@ export function useProjectLock(projectId: string, isEditor: boolean, token: stri
 
     // Cleanup
     return () => {
-      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
-      // Não fazemos leave-project aqui se o page.tsx também precisar, 
-      // mas como o useEffect depende do projectId, faz sentido limpar listeners.
       if (isEditor) {
         s.emit("release-lock", { projectId });
       }
@@ -149,7 +123,7 @@ export function useProjectLock(projectId: string, isEditor: boolean, token: stri
       s.off("lock-released");
       s.off("lock-queue-position");
     };
-  }, [socket.data, projectId, isEditor, sendHeartbeat, toast]);
+  }, [socket.data, projectId, isEditor, toast]);
 
   return lockState;
 }
