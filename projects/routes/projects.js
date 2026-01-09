@@ -1628,4 +1628,53 @@ router.delete("/:user/:project/process/cancel", (req, res) => {
     .catch((err) => res.status(500).jsonp(err));
 });
 
+/**
+ * Reorder tools in shared project (editors only)
+ */
+router.post("/shared/:projectId/reorder", async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { userId } = req.query; // Quem está a fazer o pedido
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId query parameter is required" });
+    }
+
+    // 1. Verificar Permissões
+    const permCheck = await Project.checkPermission(projectId, userId);
+    if (!permCheck.hasAccess || (permCheck.role !== 'edit' && permCheck.role !== 'owner')) {
+      return res.status(403).json({ error: "Edit access required" });
+    }
+
+    // 2. Buscar o Projeto
+    const project = await Project.getById(projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const ownerId = project.user_id.toString();
+
+    // 3. Aplicar a nova ordem
+    // O body deve ser um array de ferramentas
+    project.tools = [];
+    for (let t of req.body) {
+       // Mantemos a estrutura, atualizamos a posição
+       const tool = {
+         ...t,
+         position: project.tools.length
+       };
+       project.tools.push(tool);
+    }
+
+    // 4. Guardar
+    await Project.update(ownerId, projectId, project);
+
+    // 5. Notificar todos na sala
+    send_project_update(projectId, 'tools-reordered', { userId });
+
+    res.sendStatus(204);
+  } catch (error) {
+    console.error("Error reordering shared project:", error);
+    res.status(500).json({ error: "Error reordering tools" });
+  }
+});
+
 module.exports = { router, process_msg };

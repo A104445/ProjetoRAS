@@ -701,4 +701,36 @@ router.delete(
   }
 );
 
+router.use('/shared', async (req, res) => {
+  try {
+    // Constrói o URL de destino: http://projects:3000/shared/...
+    const url = `${projects_ms_url}/shared${req.url}`;
+    
+    console.log(`[API Gateway] Proxying shared request to: ${url}`);
+
+    // Reencaminha o pedido (GET, POST, PUT, DELETE)
+    const response = await axios({
+      method: req.method,
+      url: url,
+      data: req.body,
+      params: req.query,
+      headers: {
+        ...req.headers,
+        host: 'projects' // Ajusta o host para o interno
+      }
+    });
+
+    // Devolve a resposta do microsserviço ao cliente
+    res.status(response.status).json(response.data);
+
+  } catch (error) {
+    if (error.response) {
+      res.status(error.response.status).json(error.response.data);
+    } else {
+      console.error("[API Gateway] Shared Proxy Error:", error.message);
+      res.status(500).json({ error: "Error contacting projects service" });
+    }
+  }
+});
+
 module.exports = router;

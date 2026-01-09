@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+RUN pip3 install --default-timeout=1000 --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 \  
         libglib2.0-0 \
